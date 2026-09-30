@@ -348,7 +348,6 @@ function LetterView({ m }: { m: PublicMessage }) {
         setPull(0);
       }}
     >
-      <div aria-hidden="true" className={styles.topFade} />
       <div className={styles.topBar}>
         <SoundToggle className={styles.topBtn} />
         <button
@@ -499,6 +498,11 @@ function LetterView({ m }: { m: PublicMessage }) {
  */
 function FoldingLetter() {
   const [done, setDone] = useState(false);
+  // Never leave the flaps over the letter, even if animations don't run.
+  useEffect(() => {
+    const t = window.setTimeout(() => setDone(true), 1600);
+    return () => window.clearTimeout(t);
+  }, []);
   if (done) return null;
   return (
     <span

@@ -315,7 +315,7 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
 
 function EmptyWall() {
   return (
-    <div className="mx-auto max-w-md py-10 text-center">
+    <div className={`${styles.invite} mx-auto max-w-xl px-5 pt-8 pb-9 text-center sm:px-10`}>
       <Icon3D name="envelope" size={148} className="mx-auto" />
       <p className="mt-5 text-xl leading-snug font-bold text-plum sm:text-2xl">{COPY.emptyWall}</p>
       <a href="#write" className="btn btn-primary mt-6 text-[1.05rem]">

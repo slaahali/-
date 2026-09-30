@@ -522,7 +522,7 @@
 }
 .stepHint {
   font-size: 0.8rem;
-  color: var(--color-ink-mute, #786370);
+  color: var(--color-ink-soft, #6b5462);
 }
 
 /* ---- opening: the triangle-folded letter unfolds into the sheet ---- */
