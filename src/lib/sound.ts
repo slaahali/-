@@ -158,7 +158,6 @@ function synth(ac: AudioContext, name: SoundName) {
       crinkle(ac, dest, t + d + 0.02, 0.06, 5200 + Math.random() * 1500, 1.4, 0.08);
     });
     crinkle(ac, dest, t + 0.3, 0.18, 900, 0.7, 0.1);
-    chime(ac, t + 0.28);
     return;
   }
   if (name === "chime") {
@@ -218,8 +217,6 @@ export async function play(name: SoundName): Promise<void> {
     src.buffer = buf;
     src.connect(out(ac, name === "chime" ? 0.55 : 0.85));
     src.start();
-    // The unfold clip is paper only; add the reveal shimmer just after it.
-    if (name === "open") window.setTimeout(() => void play("chime"), 260);
     return;
   }
   synth(ac, name);
