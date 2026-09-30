@@ -14,6 +14,17 @@ const plex = localFont({
   ],
 });
 
+// Brand font (Molhim, supplied by The Chefz). Arabic + digits only: Latin text,
+// «» quotes, dashes and ellipses fall back to IBM Plex Sans Arabic.
+const molhim = localFont({
+  variable: "--font-molhim",
+  display: "swap",
+  src: [
+    { path: "../fonts/Molhim-Regular.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/Molhim-Bold.woff2", weight: "700", style: "normal" },
+  ],
+});
+
 const ruqaa = localFont({
   variable: "--font-ruqaa",
   display: "swap",
@@ -50,7 +61,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="ar" dir="rtl" className={`${plex.variable} ${ruqaa.variable}`}>
+    <html lang="ar" dir="rtl" className={`${molhim.variable} ${plex.variable} ${ruqaa.variable}`}>
       <body className="min-h-dvh antialiased">{children}</body>
     </html>
   );

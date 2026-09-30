@@ -48,7 +48,7 @@ export function Header() {
           aria-label="ذا شفز — الصفحة الرئيسية"
           className="-m-1.5 shrink-0 rounded-xl p-1.5"
         >
-          <ChefzLogo fluid priority height={26} className="h-[21px] sm:h-[25px]" />
+          <ChefzLogo fluid priority height={30} className="h-[26px] sm:h-[30px]" />
         </Link>
 
         <nav aria-label="أقسام الصفحة" className="ms-6 hidden items-center gap-1 md:flex lg:ms-10">

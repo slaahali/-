@@ -2,22 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ICONS, type IconName } from "@/lib/assets";
-
-const EMOJI_FALLBACK: Record<IconName, string> = {
-  letter: "💌",
-  gift: "🎁",
-  books: "📚",
-  pencil: "✏️",
-  cap: "🎓",
-  plane: "✉️",
-  search: "🔍",
-  heart: "💜",
-};
+import { IconArt } from "./icon-art";
 
 /**
  * One of the Higgsfield 3D icons. Tries the self-hosted copy first (/public/3d),
- * then the original CDN file, and finally degrades to an emoji so layouts never
- * break when neither is reachable.
+ * then the original CDN file, and finally degrades to a flat drawing of the
+ * same subject (icon-art.tsx) so layouts never break when neither is reachable.
  */
 export function Icon3D({
   name,
@@ -47,15 +37,12 @@ export function Icon3D({
 
   if (stage === 2) {
     return (
-      <span
-        aria-hidden={decorative || undefined}
-        role={decorative ? undefined : "img"}
-        aria-label={decorative ? undefined : icon.alt}
-        className={`inline-grid select-none place-items-center ${className}`}
-        style={{ width: size, height: size, fontSize: size * 0.56, lineHeight: 1 }}
-      >
-        {EMOJI_FALLBACK[name]}
-      </span>
+      <IconArt
+        name={name}
+        size={size}
+        label={decorative ? undefined : icon.alt}
+        className={`inline-block select-none ${className}`}
+      />
     );
   }
 

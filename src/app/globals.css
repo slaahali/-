@@ -41,8 +41,10 @@
   --color-success: #2f8f5b;
   --color-danger: #c2361f;
 
-  --font-sans: var(--font-plex), "IBM Plex Sans Arabic", system-ui, sans-serif;
-  --font-hand: var(--font-ruqaa), "Aref Ruqaa", var(--font-plex), serif;
+  --font-sans: var(--font-molhim, "Molhim"), var(--font-plex, "IBM Plex Sans Arabic"), system-ui, sans-serif;
+  /* Plex first: for Latin-heavy or numeric inputs (phone/email) where Molhim has no glyphs. */
+  --font-latin: var(--font-plex, "IBM Plex Sans Arabic"), system-ui, sans-serif;
+  --font-hand: var(--font-ruqaa, "Aref Ruqaa"), var(--font-molhim, "Molhim"), var(--font-plex), serif;
 
   --radius-card: 1.375rem;
   --radius-pill: 999px;

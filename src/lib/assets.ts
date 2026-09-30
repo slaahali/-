@@ -70,6 +70,14 @@ export function cardStyle(m: { variant: number; inMemory?: boolean }): CardStyle
   return m.inMemory ? MEMORY_STYLE : colorAt(m.variant);
 }
 
+/** Wax seal renders (Higgsfield), one per card colour + memory. */
+type SealKey = keyof typeof manifest.seals;
+export function sealFor(m: { variant: number; inMemory?: boolean }): { local: string; remote: string } {
+  const key = cardStyle(m).key as SealKey;
+  const file = manifest.seals[key] ?? manifest.seals.plum;
+  return { local: `/seals/${key}.webp`, remote: `${manifest.cdn}/${file}` };
+}
+
 /** @deprecated use cardStyle(m) / colorAt(v). Kept for older call sites. */
 export const VARIANTS = CARD_COLORS;
 /** @deprecated use cardStyle(m) / colorAt(v). */

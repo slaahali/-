@@ -16,6 +16,19 @@ export function normalizeQuery(q: string | null | undefined): string {
   return clampChars((q ?? "").trim(), MAX_QUERY_CHARS).trim();
 }
 
+export const SCENE_SIZE = 40;
+
+/** The newest letters for the floating 3D field (the hero shows the latest ones). */
+export async function getSceneLetters(): Promise<PublicMessage[]> {
+  await connection();
+  try {
+    return (await getStore().list({ sort: "new", limit: SCENE_SIZE })).items;
+  } catch (e) {
+    logError("[data] getSceneLetters failed", e);
+    return [];
+  }
+}
+
 /** First page of the wall (newest first), optionally filtered by a search (`/?q=`). */
 export async function getInitialWall(q?: string): Promise<ListResult> {
   await connection();

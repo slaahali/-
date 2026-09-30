@@ -1,8 +1,8 @@
 import { COPY } from "@/lib/config";
 
-/** Intrinsic size of /public/brand/thechefz-logo.svg (keep in sync when the official file lands). */
-const LOGO_W = 352;
-const LOGO_H = 70;
+/** Intrinsic size of /public/brand/thechefz-logo.webp (official two-block wordmark). */
+const LOGO_W = 497;
+const LOGO_H = 120;
 
 /**
  * The Chefz wordmark. `height` (px) sizes it; pass `fluid` and height utilities
@@ -21,9 +21,9 @@ export function ChefzLogo({
 }) {
   const width = Math.round((height * LOGO_W) / LOGO_H);
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- tiny static SVG, no optimisation needed
+    // eslint-disable-next-line @next/next/no-img-element -- tiny static logo, no optimisation needed
     <img
-      src="/brand/thechefz-logo.svg"
+      src="/brand/thechefz-logo.webp"
       alt={COPY.brand}
       width={width}
       height={height}
