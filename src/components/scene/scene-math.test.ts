@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DESKTOP, MOBILE, TEXTURE_BUDGET, textureBudgetBytes, textureBytes } from "./constants";
-import { toSafeLetter } from "./engine";
+import { DESKTOP, MOBILE, TEXTURE_BUDGET, fieldSize, textureBudgetBytes, textureBytes } from "./constants";
+import { toSafeLetter } from "./shared";
 import { cubicBezier, easeInOutCubic, easeInOutSine, flightControls, flightStart } from "./flight";
 import { hashString, mulberry32 } from "./random";
 import { wrapIntoBoxes } from "./textLayout";
@@ -15,9 +15,21 @@ describe("texture budget", () => {
     for (const p of [DESKTOP, MOBILE]) {
       expect(p.tex.h / p.tex.w).toBeCloseTo(0.8, 1);
       expect(p.fillerTex.h / p.fillerTex.w).toBeCloseTo(0.8, 1);
-      expect(p.total).toBeGreaterThanOrEqual(p.maxReal);
+      expect(p.minField).toBeLessThanOrEqual(p.maxReal);
     }
     expect(textureBytes(256, 256, false)).toBe(262144);
+  });
+});
+
+describe("hero field size", () => {
+  it("pads with fillers only below minField and never exceeds maxReal", () => {
+    for (const p of [DESKTOP, MOBILE]) {
+      expect(fieldSize(0, p)).toBe(p.minField);
+      expect(fieldSize(p.minField - 5, p)).toBe(p.minField);
+      expect(fieldSize(p.minField + 3, p)).toBe(p.minField + 3); // all real, no fillers
+      expect(fieldSize(500, p)).toBe(p.maxReal);
+    }
+    expect(DESKTOP.maxReal).toBe(40); // the whole newest-40 page flies on desktop
   });
 });
 

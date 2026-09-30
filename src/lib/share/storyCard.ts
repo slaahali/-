@@ -1,14 +1,36 @@
 // Browser only: draws a 1080×1920 story image of a letter on a <canvas> and
 // shares it (Web Share with files) or downloads it.
 //
+// The look follows the V2 stationery direction: the writer's colour is the
+// envelope, the letter is a cream sheet pulled out of it (short letters peek
+// out less, so the envelope grows and nothing looks empty), with a letterhead
+// logo, a perforated postage stamp + postmark, a wax seal on the envelope and a
+// slanted rubber stamp.
+//
 // Fonts come from next/font, whose family names are hashed — read them from the
-// --font-plex / --font-ruqaa CSS variables and load each weight before drawing.
-// The 3D icon is drawn from the same-origin copy only (a CDN image would taint
-// the canvas and break toBlob).
+// --font-molhim / --font-plex / --font-ruqaa CSS variables and load each weight
+// before drawing. Molhim first with Plex after it: the canvas falls back per
+// glyph, so Latin letters and «» — … come from Plex. Images (logo, seal, stamp
+// icon) are same-origin only (a CDN image would taint the canvas and break
+// toBlob); each one has a drawn fallback.
 
-import { ICONS, cardStyle, type CardStyle } from "@/lib/assets";
+import { ICONS, cardStyle, sealFor, type CardStyle } from "@/lib/assets";
 import { COPY, HASHTAG, SITE_URL } from "@/lib/config";
-import { fromName, stampFor, toLine } from "@/lib/format";
+import { displayTo, fromName, stampFor } from "@/lib/format";
+import {
+  DOVE_PATH,
+  HEART_PATH,
+  ICON_ART,
+  INK,
+  cancelWaves,
+  envelopeColors,
+  hexRgb,
+  mixHex,
+  perforatedPath,
+  seeded,
+  waxBlobPath,
+  type EnvelopeColors,
+} from "@/lib/og/art";
 import { track } from "@/lib/track";
 import type { PublicMessage } from "@/lib/types";
 import { isAbortError, letterPayload } from "./links";
@@ -16,35 +38,55 @@ import { isAbortError, letterPayload } from "./links";
 const W = 1080;
 const H = 1920;
 const FILE_NAME = "thechefz-teacher-letter.png";
+const LOGO_SRC = "/brand/thechefz-logo.webp";
+const LOGO_RATIO = 497 / 120;
 
-const INK = {
-  plumDeep: "#2b0a20",
-  paper: "#fffdf9",
-  inkSoft: "#6b5462",
-  orange: "#eb652c",
-  plum: "#691d4e",
+const T = {
+  to: "إلى",
+  toMemory: "إلى روح",
+  cta: "اكتب رسالة لمعلمك",
+  postmarkTop: "يوم المعلم",
+  postmarkBottom: "٥ أكتوبر",
 };
 
 type Ctx = CanvasRenderingContext2D;
 interface Fonts {
-  plex: string;
-  ruqaa: string;
+  sans: string;
+  latin: string;
+  hand: string;
+}
+interface Images {
+  logo: HTMLImageElement | null;
+  seal: HTMLImageElement | null;
+  icon: HTMLImageElement | null;
 }
 
 // --- small utils -------------------------------------------------------------
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const rad = (deg: number) => (deg * Math.PI) / 180;
 
-function cssFamily(varName: string, fallback: string): string {
+function cssFamily(varName: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  return v ? `${v}, ${fallback}` : fallback;
+  return v || "";
+}
+
+function fontsFromCss(): Fonts {
+  const molhim = cssFamily("--font-molhim") || '"Molhim"';
+  const plex = cssFamily("--font-plex") || '"IBM Plex Sans Arabic"';
+  const ruqaa = cssFamily("--font-ruqaa") || '"Aref Ruqaa"';
+  return {
+    sans: `${molhim}, ${plex}, system-ui, sans-serif`,
+    latin: `${plex}, system-ui, sans-serif`,
+    hand: `${ruqaa}, ${molhim}, serif`,
+  };
 }
 
 async function loadFonts(f: Fonts): Promise<void> {
   if (!document.fonts?.load) return;
-  const sample = "أبجد هوز شكراً abc 123";
-  const specs = [`400 36px ${f.plex}`, `700 64px ${f.plex}`, `400 48px ${f.ruqaa}`, `700 48px ${f.ruqaa}`];
-  await Promise.race([Promise.allSettled(specs.map((s) => document.fonts.load(s, sample))), sleep(2000)]);
+  const sample = "أبجد هوز شكراً abc 123 «»";
+  const specs = [`400 40px ${f.sans}`, `700 64px ${f.sans}`, `700 40px ${f.latin}`, `700 48px ${f.hand}`];
+  await Promise.race([Promise.allSettled(specs.map((s) => document.fonts.load(s, sample))), sleep(2500)]);
 }
 
 function loadImage(src: string, timeoutMs: number): Promise<HTMLImageElement | null> {
@@ -65,47 +107,13 @@ function loadImage(src: string, timeoutMs: number): Promise<HTMLImageElement | n
   });
 }
 
-function seeded(seedText: string) {
-  let h = 2166136261;
-  for (let i = 0; i < seedText.length; i++) h = Math.imul(h ^ seedText.charCodeAt(i), 16777619);
-  let a = h >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function hexRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  const v = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
-  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-}
-
-function luminance([r, g, b]: [number, number, number]): number {
-  const c = (x: number) => {
-    const s = x / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * c(r) + 0.7152 * c(g) + 0.0722 * c(b);
-}
-
-function mix(a: string, b: string, t: number): [number, number, number] {
-  const x = hexRgb(a);
-  const y = hexRgb(b);
-  return [0, 1, 2].map((i) => Math.round(x[i] + (y[i] - x[i]) * t)) as [number, number, number];
-}
-
-/** White on the background where it reads well, deep plum where the gradient is too light. */
-function inkOn(style: CardStyle, t: number): string {
-  const L = luminance(mix(style.gradient[0], style.gradient[1], t));
-  return 1.05 / (L + 0.05) >= 2.5 ? "#ffffff" : INK.plumDeep;
-}
+const rgba = (hex: string, a: number) => {
+  const [r, g, b] = hexRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+};
 
 const EMOJI_RE = /\p{Extended_Pictographic}|[︎️‍]/gu;
-const noEmoji = (s: string) => s.replace(EMOJI_RE, "").replace(/\s+/g, " ").trim();
+const noEmoji = (s: string) => s.replace(EMOJI_RE, "").replace(/[ \t]+/g, " ").trim();
 
 function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
@@ -121,30 +129,45 @@ function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: numb
   ctx.closePath();
 }
 
-function heart(ctx: Ctx, cx: number, cy: number, size: number, fill: string) {
+/** Draws a 24-grid motif path centred on (cx, cy). */
+function motif(ctx: Ctx, d: string, cx: number, cy: number, size: number, fill: string) {
   const s = size / 24;
   ctx.save();
   ctx.translate(cx - 12 * s, cy - 12 * s);
   ctx.scale(s, s);
   ctx.fillStyle = fill;
-  ctx.fill(
-    new Path2D(
-      "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
-    ),
-  );
+  ctx.fill(new Path2D(d));
   ctx.restore();
 }
 
-function sparkle(ctx: Ctx, cx: number, cy: number, r: number, fill: string) {
-  const k = r * 0.18;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - r);
-  ctx.bezierCurveTo(cx + k, cy - k, cx + k, cy - k, cx + r, cy);
-  ctx.bezierCurveTo(cx + k, cy + k, cx + k, cy + k, cx, cy + r);
-  ctx.bezierCurveTo(cx - k, cy + k, cx - k, cy + k, cx - r, cy);
-  ctx.bezierCurveTo(cx - k, cy - k, cx - k, cy - k, cx, cy - r);
-  ctx.fillStyle = fill;
-  ctx.fill();
+/** Tiny tiled specks for a paper-grain feel (a repeating tile keeps the PNG small). */
+function grainPattern(ctx: Ctx, color: string, alpha: number): CanvasPattern | null {
+  const tile = document.createElement("canvas");
+  tile.width = 180;
+  tile.height = 180;
+  const t = tile.getContext("2d");
+  if (!t) return null;
+  const rand = seeded(`grain${color}`);
+  t.fillStyle = color;
+  for (let i = 0; i < 260; i++) {
+    t.globalAlpha = alpha * (0.3 + rand() * 0.7);
+    const s = 1 + rand() * 2.2;
+    t.fillRect(Math.floor(rand() * 180), Math.floor(rand() * 180), s, s);
+  }
+  t.globalAlpha = alpha * 0.8;
+  t.strokeStyle = color;
+  t.lineWidth = 1;
+  for (let i = 0; i < 14; i++) {
+    const x = rand() * 180;
+    const y = rand() * 180;
+    const a = rand() * Math.PI;
+    const l = 5 + rand() * 9;
+    t.beginPath();
+    t.moveTo(x, y);
+    t.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    t.stroke();
+  }
+  return ctx.createPattern(tile, "repeat");
 }
 
 // --- text layout -------------------------------------------------------------
@@ -160,8 +183,11 @@ function ellipsize(ctx: Ctx, line: string, maxWidth: number): string {
   return s + ELLIPSIS;
 }
 
-/** Word wrap with measureText (ctx.font must be set). Keeps the writer's line breaks. */
-function wrap(ctx: Ctx, text: string, maxWidth: number, keepBlankLines = true): string[] {
+/**
+ * Word wrap with measureText (ctx.font must be set). Keeps the writer's line
+ * breaks. `widthFor(i)` lets the first lines be narrower (beside the stamp).
+ */
+function wrap(ctx: Ctx, text: string, widthFor: (line: number) => number, keepBlankLines = true): string[] {
   const out: string[] = [];
   const paragraphs = text.replace(/\r/g, "").split("\n").map((p) => p.replace(/[ \t]+/g, " ").trim());
   for (const p of paragraphs) {
@@ -171,18 +197,19 @@ function wrap(ctx: Ctx, text: string, maxWidth: number, keepBlankLines = true): 
     }
     let cur = "";
     for (const word of p.split(" ")) {
+      const max = widthFor(out.length);
       const next = cur ? `${cur} ${word}` : word;
-      if (ctx.measureText(next).width <= maxWidth) {
+      if (ctx.measureText(next).width <= max) {
         cur = next;
         continue;
       }
       if (cur) out.push(cur);
-      if (ctx.measureText(word).width <= maxWidth) {
+      if (ctx.measureText(word).width <= widthFor(out.length)) {
         cur = word;
       } else {
         let piece = "";
         for (const ch of word) {
-          if (piece && ctx.measureText(piece + ch).width > maxWidth) {
+          if (piece && ctx.measureText(piece + ch).width > widthFor(out.length)) {
             out.push(piece);
             piece = "";
           }
@@ -207,340 +234,611 @@ function fitSize(ctx: Ctx, text: string, font: (size: number) => string, maxWidt
   return min;
 }
 
-// --- drawing -----------------------------------------------------------------
+// --- geometry ----------------------------------------------------------------
 
-function drawBackground(ctx: Ctx, style: CardStyle, memory: boolean, rand: () => number) {
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, style.gradient[0]);
-  g.addColorStop(1, style.gradient[1]);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+const SHEET_X = 92;
+const SHEET_W = W - SHEET_X * 2;
+const SHEET_TOP = 150;
+const TX = SHEET_X + SHEET_W - 74; // text start (right edge)
+const TL = SHEET_X + 70; // text end (left edge)
+const TW = TX - TL;
+const STAMP = { x: TL - 4, y: SHEET_TOP + 112, w: 150, h: 184 };
+const PM_R = 58;
+const PM_X = STAMP.x + STAMP.w + 10;
+const POCKET_MIN = 1030;
+const POCKET_MAX = 1340;
 
-  const blob = (x: number, y: number, r: number, color: string, alpha: number) => {
-    const [cr, cg, cb] = hexRgb(color);
-    const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
-    rg.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha})`);
-    rg.addColorStop(0.6, `rgba(${cr},${cg},${cb},${alpha * 0.4})`);
-    rg.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
-    ctx.fillStyle = rg;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
-  };
-  blob(W * 0.86, H * 0.08, 620, "#ffffff", memory ? 0.22 : 0.3);
-  blob(W * 0.05, H * 0.5, 680, "#ffffff", 0.16);
-  blob(W * 0.9, H * 0.9, 640, memory ? "#ffffff" : "#f7a64f", memory ? 0.12 : 0.26);
-  blob(W * 0.15, H * 0.97, 520, "#ffffff", 0.12);
-
-  // Faint folded letters drifting in the background.
-  const count = memory ? 7 : 16;
-  ctx.save();
-  ctx.lineJoin = "round";
-  for (let i = 0; i < count; i++) {
-    const x = rand() * W;
-    const y = 60 + rand() * (H - 120);
-    const w = 60 + rand() * 90;
-    const h = w * 0.64;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate((rand() - 0.5) * 1.2);
-    ctx.globalAlpha = (memory ? 0.08 : 0.1) + rand() * (memory ? 0.06 : 0.12);
-    ctx.strokeStyle = "#ffffff";
-    ctx.fillStyle = "#ffffff";
-    ctx.lineWidth = 3;
-    if (i % 3 === 2) {
-      // a lone folded corner (triangle)
-      ctx.beginPath();
-      ctx.moveTo(-w / 2, -h / 2);
-      ctx.lineTo(w / 2, -h / 2);
-      ctx.lineTo(0, h / 3);
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      roundRect(ctx, -w / 2, -h / 2, w, h, 6);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-w / 2 + 3, -h / 2 + 3);
-      ctx.lineTo(0, h * 0.1);
-      ctx.lineTo(w / 2 - 3, -h / 2 + 3);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-  ctx.restore();
-
-  if (!memory) {
-    ctx.save();
-    for (let i = 0; i < 7; i++) {
-      ctx.globalAlpha = 0.35 + rand() * 0.4;
-      sparkle(ctx, 40 + rand() * (W - 80), 40 + rand() * (H - 80), 8 + rand() * 14, "#ffffff");
-    }
-    ctx.restore();
-  }
-}
-
-function drawHeader(ctx: Ctx, f: Fonts, style: CardStyle, memory: boolean, y0: number) {
-  const ink = inkOn(style, 0.15);
-  ctx.save();
-  ctx.direction = "rtl";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = ink;
-  ctx.font = `700 76px ${f.plex}`;
-  ctx.fillText(COPY.brand, W / 2, y0 + 68);
-
-  const sub = memory ? "في ذكرى 🤍" : "يوم المعلم 💜";
-  ctx.font = `700 38px ${f.plex}`;
-  const sw = ctx.measureText(sub).width + 64;
-  roundRect(ctx, W / 2 - sw / 2, y0 + 96, sw, 64, 32);
-  ctx.fillStyle = ink === "#ffffff" ? "rgba(255,255,255,0.2)" : "rgba(43,10,32,0.08)";
-  ctx.fill();
-  ctx.fillStyle = ink;
-  ctx.fillText(sub, W / 2, y0 + 141);
-  ctx.restore();
-}
-
-interface CardLayout {
-  h: number;
-  toLines: string[];
-  toSize: number;
+interface Layout {
+  toLabel: string;
+  nameLines: string[];
+  nameSize: number;
+  nameBase: number;
   school: string | null;
+  schoolBase: number;
   bodyLines: string[];
   bodySize: number;
   lh: number;
-  toBase: number;
-  schoolBase: number;
-  divider: number;
   bodyBase: number;
-  sigBase: number;
   signature: string;
   sigSize: number;
+  sigBase: number;
+  date: string;
+  /** Where the sheet disappears into the envelope. */
+  pocket: number;
 }
 
-const HEADER_H = 230; // brand + pill, then the gap above the card
-const FOOTER_H = 310; // CTA + host pill + hashtag below the card
-const CARD_W = 900;
-const CARD_MIN_H = 820;
-const CARD_MAX_H = 1140;
-const TX = CARD_W - 104; // text right edge (after the margin rule)
-const TL = 92;
-const TW = TX - TL;
-const TO_W = TX - 210; // leave room for the icon sticker at the top-left
+const dateFmt = () =>
+  new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", { day: "numeric", month: "long", year: "numeric" });
 
-function layoutCard(ctx: Ctx, m: PublicMessage, f: Fonts): CardLayout {
-  const plex = (w: number) => (s: number) => `${w} ${s}px ${f.plex}`;
-  const ruqaa = (w: number) => (s: number) => `${w} ${s}px ${f.ruqaa}`;
+function layout(ctx: Ctx, m: PublicMessage, f: Fonts): Layout {
+  const sans = (w: number) => (s: number) => `${w} ${s}px ${f.sans}`;
+  const hand = (w: number) => (s: number) => `${w} ${s}px ${f.hand}`;
+  const memory = Boolean(m.inMemory);
 
-  const to = toLine(m);
-  let toSize = fitSize(ctx, to, plex(700), TO_W, 68, 50);
-  let toLines = [to];
-  if (ctx.measureText(to).width > TO_W) {
-    toSize = 50;
-    ctx.font = plex(700)(toSize);
-    toLines = wrap(ctx, to, TO_W);
-    if (toLines.length > 2) toLines = [toLines[0], ellipsize(ctx, toLines.slice(1).join(" "), TO_W)];
+  // Address block: «إلى» small, the name big (two lines if it must), the school.
+  const name = noEmoji(displayTo(m));
+  const nameFirstW = TX - (PM_X + PM_R + 34);
+  let nameSize = fitSize(ctx, name, sans(700), nameFirstW, 88, 60);
+  let nameLines = [name];
+  if (ctx.measureText(name).width > nameFirstW) {
+    for (nameSize = 64; nameSize >= 48; nameSize -= 4) {
+      ctx.font = sans(700)(nameSize);
+      nameLines = wrap(ctx, name, (i) => (i === 0 ? nameFirstW : TW));
+      if (nameLines.length <= 2) break;
+    }
+    if (nameLines.length > 2) nameLines = [nameLines[0], ellipsize(ctx, nameLines.slice(1).join(" "), TW)];
   }
-  const toBase = 150;
-  const toLast = toBase + (toLines.length - 1) * toSize * 1.25;
+  const labelBase = SHEET_TOP + 172;
+  const nameBase = labelBase + 20 + nameSize * 0.98;
+  const nameLast = nameBase + (nameLines.length - 1) * nameSize * 1.3;
 
-  let school: string | null = m.school?.trim() || null;
+  let school: string | null = m.school ? noEmoji(m.school) || null : null;
+  const schoolBase = nameLast + 64;
   if (school) {
-    ctx.font = plex(400)(36);
-    if (ctx.measureText(school).width > TW) school = ellipsize(ctx, school, TW);
+    ctx.font = sans(400)(38);
+    const maxW = nameLines.length > 1 ? TW : nameFirstW;
+    if (ctx.measureText(school).width > maxW) school = ellipsize(ctx, school, maxW);
   }
-  const schoolBase = toLast + 62;
-  const divider = (school ? schoolBase : toLast) + 48;
-  const bodyTop = divider + 34;
+  const headEnd = Math.max(school ? schoolBase : nameLast, STAMP.y + STAMP.h + 10);
 
-  const signature = `— ${fromName(m)}`;
-  // Signature baseline must stay above the stamp zone at the bottom-left.
-  const sigLimit = CARD_MAX_H - 200;
-
+  // Body: as big as fits (short letters get up to 60px), then the signature
+  // right under it; the sheet ends where the content ends.
+  const bodyTop = headEnd + 44;
+  const sigMax = POCKET_MAX - 150;
+  const body = noEmoji(m.body);
   let bodySize = 34;
-  let lh = Math.round(bodySize * 1.72);
+  let lh = 66;
   let bodyLines: string[] = [];
-  for (let size = 54; size >= 34; size -= 2) {
-    ctx.font = ruqaa(400)(size);
-    const lines = wrap(ctx, m.body, TW);
-    const l = Math.round(size * 1.72);
-    const firstBase = bodyTop + size * 1.15;
-    const sig = firstBase + (lines.length - 1) * l + Math.max(78, l * 1.15);
+  const sigGap = (l: number) => Math.max(96, l * 1.15);
+  for (let size = 60; size >= 34; size -= 2) {
+    ctx.font = sans(400)(size);
+    const lines = wrap(ctx, body, () => TW);
+    const l = Math.round(size * 1.95);
     bodySize = size;
     lh = l;
     bodyLines = lines;
-    if (sig <= sigLimit) break;
+    if (bodyTop + size + (lines.length - 1) * l + sigGap(l) <= sigMax) break;
   }
-  const bodyBase = bodyTop + bodySize * 1.15;
-  const sigGap = Math.max(78, lh * 1.15);
-  if (bodyBase + (bodyLines.length - 1) * lh + sigGap > sigLimit) {
+  const bodyBase = bodyTop + bodySize;
+  if (bodyBase + (bodyLines.length - 1) * lh + sigGap(lh) > sigMax) {
     // Still too long at the smallest size: drop blank lines, then cut with "…".
-    ctx.font = ruqaa(400)(bodySize);
-    const max = Math.max(1, Math.floor((sigLimit - sigGap - bodyBase) / lh) + 1);
-    const compact = wrap(ctx, m.body, TW, false);
+    ctx.font = sans(400)(bodySize);
+    const max = Math.max(1, Math.floor((sigMax - sigGap(lh) - bodyBase) / lh) + 1);
+    const compact = wrap(ctx, body, () => TW, false);
     bodyLines = compact.slice(0, max);
     if (compact.length > max) bodyLines[max - 1] = ellipsize(ctx, bodyLines[max - 1], TW);
   }
-  const sigBase = bodyBase + (bodyLines.length - 1) * lh + sigGap;
-  const sigSize = fitSize(ctx, signature, ruqaa(700), 540, Math.min(54, bodySize + 6), 34);
-  const h = Math.max(CARD_MIN_H, Math.min(CARD_MAX_H, sigBase + 250));
+  const sigBase = bodyBase + (bodyLines.length - 1) * lh + sigGap(lh);
+  const signature = `— ${noEmoji(fromName(m)) || COPY.anonymousFrom}`;
+  const sigSize = fitSize(ctx, signature, hand(700), TW * 0.62, 60, 40);
 
-  return { h, toLines, toSize, school, bodyLines, bodySize, lh, toBase, schoolBase, divider, bodyBase, sigBase, signature, sigSize };
+  let date = "";
+  const t = new Date(m.createdAt);
+  if (Number.isFinite(t.getTime())) date = dateFmt().format(t);
+
+  const pocket = Math.round(Math.min(POCKET_MAX, Math.max(POCKET_MIN, sigBase + 170)));
+  return {
+    toLabel: memory ? T.toMemory : T.to,
+    nameLines,
+    nameSize,
+    nameBase,
+    school,
+    schoolBase,
+    bodyLines,
+    bodySize,
+    lh,
+    bodyBase,
+    signature,
+    sigSize,
+    sigBase,
+    date,
+    pocket,
+  };
 }
 
-function drawCard(
-  ctx: Ctx,
-  L: CardLayout,
-  m: PublicMessage,
-  f: Fonts,
-  style: CardStyle,
-  icon: HTMLImageElement | null,
-  top: number,
-) {
-  ctx.save();
-  ctx.translate(W / 2, top + L.h / 2);
-  ctx.rotate((-2 * Math.PI) / 180);
-  ctx.translate(-CARD_W / 2, -L.h / 2);
+// --- drawing: backdrop + envelope -------------------------------------------
 
-  // Paper + shadow
+function drawBackdrop(ctx: Ctx, env: EnvelopeColors) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, mixHex(env.base, "#ffffff", 0.16));
+  g.addColorStop(0.55, env.base);
+  g.addColorStop(1, mixHex(env.base, "#000000", 0.1));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(W * 0.5, H * 0.08, 0, W * 0.5, H * 0.08, W * 0.9);
+  glow.addColorStop(0, "rgba(255,255,255,0.22)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/** The open top flap, behind the sheet: only its slanted sides show. */
+function drawOpenFlap(ctx: Ctx, env: EnvelopeColors, pocket: number) {
+  const left = -40;
+  const right = W + 40;
+  const apexY = pocket - 700;
   ctx.save();
-  ctx.shadowColor = "rgba(43,10,32,0.32)";
-  ctx.shadowBlur = 80;
-  ctx.shadowOffsetY = 34;
-  roundRect(ctx, 0, 0, CARD_W, L.h, 40);
+  ctx.shadowColor = "rgba(0,0,0,0.18)";
+  ctx.shadowBlur = 40;
+  ctx.beginPath();
+  ctx.moveTo(left, pocket);
+  ctx.lineTo(W / 2, apexY);
+  ctx.lineTo(right, pocket);
+  ctx.closePath();
+  ctx.fillStyle = env.dark;
+  ctx.fill();
+  ctx.restore();
+  // The lining catches a little light along the fold.
+  const g = ctx.createLinearGradient(0, apexY, 0, pocket);
+  g.addColorStop(0, rgba(env.deep, 0.0));
+  g.addColorStop(1, rgba(env.deep, 0.35));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(left, pocket);
+  ctx.lineTo(W / 2, apexY);
+  ctx.lineTo(right, pocket);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** The envelope's back (pocket) in front of the sheet: side flaps + bottom flap. */
+function drawPocket(ctx: Ctx, env: EnvelopeColors, pocket: number, grain: CanvasPattern | null) {
+  const left = -40;
+  const right = W + 40;
+  const bottom = H + 60;
+  const apexY = pocket + 150;
+  const sideY = pocket + 330;
+
+  // Shadow the sheet casts as it goes into the envelope.
+  const inner = ctx.createLinearGradient(0, pocket - 70, 0, pocket);
+  inner.addColorStop(0, "rgba(43,10,32,0)");
+  inner.addColorStop(1, "rgba(43,10,32,0.2)");
+  ctx.fillStyle = inner;
+  ctx.fillRect(SHEET_X - 10, pocket - 70, SHEET_W + 20, 70);
+
+  ctx.save();
+  ctx.shadowColor = "rgba(43,10,32,0.28)";
+  ctx.shadowBlur = 36;
+  ctx.shadowOffsetY = -6;
+  ctx.fillStyle = env.base;
+  ctx.fillRect(left, pocket, right - left, bottom - pocket);
+  ctx.restore();
+
+  // Side flaps (lighter), meeting under the bottom flap.
+  ctx.fillStyle = env.light;
+  ctx.beginPath();
+  ctx.moveTo(left, pocket);
+  ctx.lineTo(W / 2 - 40, sideY);
+  ctx.lineTo(left, bottom);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(right, pocket);
+  ctx.lineTo(W / 2 + 40, sideY);
+  ctx.lineTo(right, bottom);
+  ctx.closePath();
+  ctx.fill();
+
+  // Bottom flap with a soft shadow on the side flaps.
+  const flap = new Path2D(`M${left} ${bottom}L${W / 2} ${apexY}L${right} ${bottom}Z`);
+  ctx.save();
+  ctx.shadowColor = rgba(env.deep, 0.45);
+  ctx.shadowBlur = 26;
+  ctx.shadowOffsetY = -4;
+  ctx.fillStyle = env.base;
+  ctx.fill(flap);
+  ctx.restore();
+  const shade = ctx.createLinearGradient(0, apexY, 0, bottom);
+  shade.addColorStop(0, rgba("#ffffff", 0.06));
+  shade.addColorStop(1, rgba(env.deep, 0.12));
+  ctx.fillStyle = shade;
+  ctx.fill(flap);
+
+  // Seams + the pocket's top edge.
+  ctx.strokeStyle = rgba(env.deep, 0.35);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(left, bottom);
+  ctx.lineTo(W / 2, apexY);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+  ctx.strokeStyle = rgba("#ffffff", 0.35);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(left, pocket + 1);
+  ctx.lineTo(right, pocket + 1);
+  ctx.stroke();
+
+  if (grain) {
+    ctx.fillStyle = grain;
+    ctx.fillRect(left, pocket, right - left, bottom - pocket);
+  }
+}
+
+function drawWaxSeal(ctx: Ctx, env: EnvelopeColors, img: HTMLImageElement | null, memory: boolean, cx: number, cy: number, r: number, seed: string) {
+  ctx.save();
+  ctx.shadowColor = "rgba(43,10,32,0.4)";
+  ctx.shadowBlur = r * 0.35;
+  ctx.shadowOffsetY = r * 0.14;
+  if (img) {
+    const s = r * 2.3;
+    ctx.drawImage(img, cx - s / 2, cy - s / 2, s, s);
+    ctx.restore();
+    return;
+  }
+  const blob = new Path2D(waxBlobPath(cx, cy, r, seeded(seed)));
+  const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r * 1.1);
+  g.addColorStop(0, env.waxLight);
+  g.addColorStop(0.55, env.wax);
+  g.addColorStop(1, env.waxDark);
+  ctx.fillStyle = g;
+  ctx.fill(blob);
+  ctx.restore();
+
+  ctx.save();
+  const ring = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+  ring.addColorStop(0, env.waxDark);
+  ring.addColorStop(1, env.waxLight);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.72, 0, Math.PI * 2);
+  ctx.fillStyle = env.wax;
+  ctx.fill();
+  ctx.lineWidth = r * 0.07;
+  ctx.strokeStyle = ring;
+  ctx.stroke();
+  const d = memory ? DOVE_PATH : HEART_PATH;
+  const m = r * (memory ? 1 : 0.9);
+  const k = r * 0.045;
+  motif(ctx, d, cx + k, cy + k, m, env.waxLight);
+  motif(ctx, d, cx - k, cy - k, m, env.waxDark);
+  motif(ctx, d, cx, cy, m, mixHex(env.wax, "#ffffff", 0.1));
+  ctx.beginPath();
+  ctx.ellipse(cx - r * 0.42, cy - r * 0.5, r * 0.2, r * 0.1, rad(-35), 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.fill();
+  ctx.restore();
+}
+
+// --- drawing: the sheet -------------------------------------------------------
+
+function drawSheet(ctx: Ctx, pocket: number, grain: CanvasPattern | null) {
+  const h = pocket - SHEET_TOP + 40; // runs on into the envelope
+  ctx.save();
+  ctx.shadowColor = "rgba(43,10,32,0.3)";
+  ctx.shadowBlur = 60;
+  ctx.shadowOffsetY = 20;
+  roundRect(ctx, SHEET_X, SHEET_TOP, SHEET_W, h, 8);
   ctx.fillStyle = INK.paper;
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  roundRect(ctx, 0, 0, CARD_W, L.h, 40);
+  roundRect(ctx, SHEET_X, SHEET_TOP, SHEET_W, h, 8);
   ctx.clip();
-  // Ruled lines aligned with the body baselines.
-  ctx.strokeStyle = "rgba(105,29,78,0.08)";
-  ctx.lineWidth = 2;
-  const phase = L.bodyBase + 13;
-  for (let y = phase - Math.floor((phase - 40) / L.lh) * L.lh; y < L.h - 10; y += L.lh) {
+  // Triangle-fold creases: two soft diagonals meeting at the top centre.
+  const apexX = SHEET_X + SHEET_W / 2;
+  const reach = SHEET_W / 2 + 60;
+  ctx.fillStyle = "rgba(43,10,32,0.022)";
+  ctx.beginPath();
+  ctx.moveTo(SHEET_X, SHEET_TOP);
+  ctx.lineTo(apexX, SHEET_TOP);
+  ctx.lineTo(SHEET_X, SHEET_TOP + reach);
+  ctx.closePath();
+  ctx.fill();
+  for (const x2 of [SHEET_X - 20, SHEET_X + SHEET_W + 20]) {
+    ctx.strokeStyle = "rgba(43,10,32,0.075)";
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(CARD_W, y);
+    ctx.moveTo(apexX, SHEET_TOP);
+    ctx.lineTo(x2, SHEET_TOP + reach);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(apexX + 2, SHEET_TOP + 1);
+    ctx.lineTo(x2 + 2, SHEET_TOP + reach + 1);
     ctx.stroke();
   }
-  // Orange margin rule on the right (reading-start) side + accent band.
-  ctx.strokeStyle = "rgba(235,101,44,0.32)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(CARD_W - 70, 0);
-  ctx.lineTo(CARD_W - 70, L.h);
-  ctx.stroke();
-  ctx.fillStyle = style.accent;
-  ctx.fillRect(0, 0, CARD_W, 16);
+  if (grain) {
+    ctx.fillStyle = grain;
+    ctx.fillRect(SHEET_X, SHEET_TOP, SHEET_W, h);
+  }
+  ctx.restore();
+}
+
+function drawLetterhead(ctx: Ctx, f: Fonts, logo: HTMLImageElement | null) {
+  const h = 50;
+  const y = SHEET_TOP + 40;
+  if (logo) {
+    const w = h * LOGO_RATIO;
+    ctx.drawImage(logo, TX - w, y, w, h);
+    return;
+  }
+  ctx.save();
+  ctx.direction = "rtl";
+  ctx.textAlign = "right";
+  ctx.fillStyle = INK.plum;
+  ctx.font = `700 46px ${f.sans}`;
+  ctx.fillText(COPY.brand, TX, y + h - 8);
+  ctx.restore();
+}
+
+/** Draws a line of text along a circle by slicing it into 1px columns (keeps Arabic shaping). */
+function arcText(ctx: Ctx, s: string, font: string, color: string, cx: number, cy: number, r: number, top: boolean) {
+  const off = document.createElement("canvas");
+  const o = off.getContext("2d");
+  if (!o) return;
+  o.font = font;
+  const w = Math.ceil(o.measureText(s).width) + 6;
+  const size = parseFloat(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? "24");
+  const h = Math.ceil(size * 1.7);
+  off.width = w;
+  off.height = h;
+  o.font = font;
+  o.direction = "rtl";
+  o.textAlign = "center";
+  o.fillStyle = color;
+  const base = h * 0.72;
+  o.fillText(s, w / 2, base);
+  const span = w / r;
+  for (let x = 0; x < w; x++) {
+    const t = (x + 0.5) / w - 0.5;
+    const a = top ? -Math.PI / 2 + t * span : Math.PI / 2 - t * span;
+    ctx.save();
+    ctx.translate(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    ctx.rotate(top ? a + Math.PI / 2 : a - Math.PI / 2);
+    ctx.drawImage(off, x, 0, 1, h, -0.6, -base, 1.4, h);
+    ctx.restore();
+  }
+}
+
+function drawStampAndPostmark(ctx: Ctx, f: Fonts, style: CardStyle, icon: HTMLImageElement | null, memory: boolean) {
+  const { x, y, w, h } = STAMP;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rad(-3));
+  ctx.translate(-cx, -cy);
+  const edge = new Path2D(perforatedPath(x, y, w, h, w * 0.045, w / 9));
+  ctx.save();
+  ctx.shadowColor = "rgba(43,10,32,0.22)";
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = 5;
+  ctx.fillStyle = "#fffefa";
+  ctx.fill(edge);
   ctx.restore();
 
-  // Text
+  const inset = w * 0.1;
+  const iw = w - inset * 2;
+  const ih = h - inset * 2 - h * 0.15;
+  const tint = memory ? mixHex(style.bg, style.accent, 0.12) : mixHex(style.bg, style.gradient[0], 0.35);
+  ctx.fillStyle = tint;
+  ctx.fillRect(x + inset, y + inset, iw, ih);
+  ctx.strokeStyle = rgba(style.accent, 0.35);
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x + inset + 4, y + inset + 4, iw - 8, ih - 8);
+  const size = Math.min(iw, ih) * (icon ? 1 : 0.84);
+  const ix = cx - size / 2;
+  const iy = y + inset + (ih - size) / 2;
+  if (icon) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + inset, y + inset, iw, ih);
+    ctx.clip();
+    ctx.drawImage(icon, ix - size * 0.06, iy - size * 0.06, size * 1.12, size * 1.12);
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.translate(ix, iy);
+    ctx.scale(size / 64, size / 64);
+    for (const part of ICON_ART[style.icon]) {
+      const p = new Path2D(part.d);
+      if (part.fill) {
+        ctx.fillStyle = part.fill;
+        ctx.fill(p);
+      }
+      if (part.stroke) {
+        ctx.strokeStyle = part.stroke;
+        ctx.lineWidth = part.sw ?? 3;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.stroke(p);
+      }
+    }
+    ctx.restore();
+  }
+  ctx.direction = "rtl";
+  ctx.textAlign = "center";
+  ctx.fillStyle = style.accent;
+  ctx.font = `700 ${Math.round(h * 0.085)}px ${f.sans}`;
+  ctx.fillText(COPY.brand, cx, y + h - inset * 0.95);
+  ctx.restore();
+
+  // Postmark: ink rings with the day on the rings, a heart, and the waves
+  // running back across the stamp.
+  const pcx = PM_X;
+  const pcy = y + h * 0.64;
+  const ink = INK.plum950;
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.globalCompositeOperation = "multiply";
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = PM_R * 0.05;
+  ctx.beginPath();
+  ctx.arc(pcx, pcy, PM_R, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = PM_R * 0.035;
+  ctx.beginPath();
+  ctx.arc(pcx, pcy, PM_R * 0.5, 0, Math.PI * 2);
+  ctx.stroke();
+  const pmFont = `700 ${Math.round(PM_R * 0.3)}px ${f.sans}`;
+  arcText(ctx, T.postmarkTop, pmFont, ink, pcx, pcy, PM_R * 0.66, true);
+  arcText(ctx, T.postmarkBottom, pmFont, ink, pcx, pcy, PM_R * 0.66, false);
+  motif(ctx, HEART_PATH, pcx, pcy, PM_R * 0.42, ink);
+  ctx.lineWidth = PM_R * 0.045;
+  ctx.lineCap = "round";
+  ctx.stroke(new Path2D(cancelWaves(pcx - PM_R * 1.08, pcy - PM_R * 0.36, x - 26 - (pcx - PM_R * 1.08), 4, PM_R * 0.24, PM_R * 0.07)));
+  ctx.restore();
+}
+
+function drawText(ctx: Ctx, L: Layout, f: Fonts, style: CardStyle) {
+  ctx.save();
   ctx.direction = "rtl";
   ctx.textAlign = "right";
   ctx.textBaseline = "alphabetic";
+
+  ctx.fillStyle = INK.inkSoft;
+  ctx.font = `400 38px ${f.sans}`;
+  ctx.fillText(L.toLabel, TX, SHEET_TOP + 172);
+
   ctx.fillStyle = style.ink;
-  ctx.font = `700 ${L.toSize}px ${f.plex}`;
-  L.toLines.forEach((line, i) => ctx.fillText(line, TX, L.toBase + i * L.toSize * 1.25));
+  ctx.font = `700 ${L.nameSize}px ${f.sans}`;
+  L.nameLines.forEach((line, i) => ctx.fillText(line, TX, L.nameBase + i * L.nameSize * 1.3));
 
   if (L.school) {
     ctx.fillStyle = INK.inkSoft;
-    ctx.font = `400 36px ${f.plex}`;
+    ctx.font = `400 38px ${f.sans}`;
     ctx.fillText(L.school, TX, L.schoolBase);
   }
 
-  // Divider: short accent rule + heart, right-aligned.
-  ctx.strokeStyle = style.accent;
-  ctx.globalAlpha = 0.55;
-  ctx.lineWidth = 4;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(TX, L.divider);
-  ctx.lineTo(TX - 120, L.divider);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-  heart(ctx, TX - 146, L.divider, 26, style.accent);
+  // Faint ruled lines behind the body only, aligned to its baselines.
+  ctx.strokeStyle = rgba(style.accent, 0.14);
+  ctx.lineWidth = 2;
+  L.bodyLines.forEach((_, i) => {
+    const y = Math.round(L.bodyBase + i * L.lh + L.bodySize * 0.34) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(TL - 10, y);
+    ctx.lineTo(TX + 10, y);
+    ctx.stroke();
+  });
 
   ctx.fillStyle = style.ink;
-  ctx.font = `400 ${L.bodySize}px ${f.ruqaa}`;
+  ctx.font = `400 ${L.bodySize}px ${f.sans}`;
   L.bodyLines.forEach((line, i) => {
     if (line) ctx.fillText(line, TX, L.bodyBase + i * L.lh);
   });
 
   ctx.fillStyle = style.accent;
-  ctx.font = `700 ${L.sigSize}px ${f.ruqaa}`;
-  const sig = ctx.measureText(L.signature).width > 540 ? ellipsize(ctx, L.signature, 540) : L.signature;
+  ctx.font = `700 ${L.sigSize}px ${f.hand}`;
+  const sigMax = TW * 0.62;
+  const sig = ctx.measureText(L.signature).width > sigMax ? ellipsize(ctx, L.signature, sigMax) : L.signature;
   ctx.fillText(sig, TX, L.sigBase);
-
-  // Rubber stamp, bottom-left, −8°.
-  const stamp = noEmoji(stampFor(m));
-  ctx.save();
-  ctx.translate(250, L.h - 120);
-  ctx.rotate((-8 * Math.PI) / 180);
-  ctx.font = `700 52px ${f.ruqaa}`;
-  ctx.textAlign = "center";
-  const sw = ctx.measureText(stamp).width + 84;
-  const sh = 104;
-  ctx.globalAlpha = 0.88;
-  ctx.strokeStyle = style.accent;
-  ctx.lineWidth = 6;
-  roundRect(ctx, -sw / 2, -sh / 2, sw, sh, 18);
-  ctx.stroke();
-  ctx.lineWidth = 2.5;
-  roundRect(ctx, -sw / 2 + 11, -sh / 2 + 11, sw - 22, sh - 22, 11);
-  ctx.stroke();
-  ctx.fillStyle = style.accent;
-  ctx.fillText(stamp, 0, 18);
-  ctx.restore();
-
-  // 3D icon sticker on the top-left corner.
-  if (icon) {
-    ctx.save();
-    ctx.translate(70, 10);
-    ctx.rotate((10 * Math.PI) / 180);
-    ctx.shadowColor = "rgba(43,10,32,0.28)";
-    ctx.shadowBlur = 36;
-    ctx.shadowOffsetY = 16;
-    const size = 230;
-    ctx.drawImage(icon, -size / 2, -size / 2, size, size);
-    ctx.restore();
+  const sigW = ctx.measureText(sig).width;
+  if (L.date) {
+    ctx.fillStyle = INK.inkMute;
+    ctx.font = `400 30px ${f.sans}`;
+    ctx.fillText(L.date, TX - sigW - 30, L.sigBase - 4);
   }
-
   ctx.restore();
 }
 
-function drawFooter(ctx: Ctx, f: Fonts, style: CardStyle, y0: number) {
-  const ink = inkOn(style, 0.85);
+/** Slanted rubber stamp with a double border; ink worn off in specks. */
+function drawRubberStamp(ctx: Ctx, f: Fonts, label: string, color: string, cx: number, cy: number) {
+  const size = 58;
+  const measure = document.createElement("canvas").getContext("2d");
+  if (!measure) return;
+  measure.font = `700 ${size}px ${f.hand}`;
+  const sw = Math.ceil(measure.measureText(label).width + size * 1.5);
+  const sh = size * 2;
+  const pad = 12;
+  const off = document.createElement("canvas");
+  off.width = sw + pad * 2;
+  off.height = sh + pad * 2;
+  const o = off.getContext("2d");
+  if (!o) return;
+  o.strokeStyle = color;
+  o.fillStyle = color;
+  o.lineWidth = size * 0.11;
+  roundRect(o, pad, pad, sw, sh, size * 0.3);
+  o.stroke();
+  o.lineWidth = size * 0.045;
+  roundRect(o, pad + size * 0.22, pad + size * 0.22, sw - size * 0.44, sh - size * 0.44, size * 0.16);
+  o.stroke();
+  o.font = `700 ${size}px ${f.hand}`;
+  o.direction = "rtl";
+  o.textAlign = "center";
+  o.fillText(label, pad + sw / 2, pad + sh / 2 + size * 0.36);
+  // Wear: knock specks out of the ink.
+  const rand = seeded(label);
+  o.globalCompositeOperation = "destination-out";
+  for (let i = 0; i < 170; i++) {
+    o.globalAlpha = 0.35 + rand() * 0.65;
+    o.beginPath();
+    o.arc(rand() * off.width, rand() * off.height, 0.8 + rand() * 2.6, 0, Math.PI * 2);
+    o.fill();
+  }
   ctx.save();
-  ctx.textAlign = "center";
-  ctx.direction = "rtl";
-  ctx.fillStyle = ink;
-  ctx.font = `700 50px ${f.plex}`;
-  ctx.fillText("اكتب رسالة لمعلمك 👇", W / 2, y0 + 110);
+  ctx.translate(cx, cy);
+  ctx.rotate(rad(-9));
+  ctx.globalAlpha = 0.88;
+  ctx.globalCompositeOperation = "multiply";
+  ctx.drawImage(off, -off.width / 2, -off.height / 2);
+  ctx.restore();
+}
 
+function drawFooter(ctx: Ctx, f: Fonts, env: EnvelopeColors, pocket: number) {
+  const ctaY = pocket + 318;
+  ctx.save();
+  ctx.direction = "rtl";
+  ctx.textAlign = "center";
+  ctx.fillStyle = env.ink;
+  ctx.font = `700 56px ${f.sans}`;
+  ctx.fillText(T.cta, W / 2, ctaY);
+
+  // The link on a cream address label, stuck on slightly crooked.
   let host = SITE_URL;
   try {
     host = new URL(SITE_URL).host;
   } catch {
     /* keep as is */
   }
-  ctx.direction = "ltr";
-  ctx.font = `700 42px ${f.plex}`;
-  const hw = ctx.measureText(host).width + 88;
+  ctx.font = `700 42px ${f.latin}`;
+  const lw = Math.min(W - 160, ctx.measureText(host).width + 96);
+  const lh = 96;
+  const ly = ctaY + 44;
   ctx.save();
-  ctx.shadowColor = "rgba(43,10,32,0.22)";
-  ctx.shadowBlur = 30;
-  ctx.shadowOffsetY = 10;
-  roundRect(ctx, W / 2 - hw / 2, y0 + 144, hw, 88, 44);
-  ctx.fillStyle = "#ffffff";
-  ctx.fill();
-  ctx.restore();
+  ctx.translate(W / 2, ly + lh / 2);
+  ctx.rotate(rad(-1.5));
+  ctx.shadowColor = "rgba(43,10,32,0.25)";
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 6;
+  ctx.fillStyle = "#fffdf6";
+  ctx.fillRect(-lw / 2, -lh / 2, lw, lh);
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = rgba(INK.plum, 0.16);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-lw / 2 + 8, -lh / 2 + 8, lw - 16, lh - 16);
+  ctx.direction = "ltr";
   ctx.fillStyle = INK.plum;
-  ctx.fillText(host, W / 2, y0 + 203);
+  ctx.fillText(host, 0, 15);
+  ctx.restore();
 
-  ctx.direction = "rtl";
-  ctx.fillStyle = ink;
-  ctx.globalAlpha = 0.92;
-  ctx.font = `700 38px ${f.plex}`;
-  ctx.fillText(HASHTAG, W / 2, y0 + 298);
+  // Plex: Molhim's "#" is a tiny dot.
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = env.ink;
+  ctx.font = `700 40px ${f.latin}`;
+  ctx.fillText(HASHTAG, W / 2, Math.min(H - 70, ly + lh + 96));
   ctx.restore();
 }
 
@@ -553,12 +851,16 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 /** 1080×1920 PNG of the letter for Instagram / Snapchat stories. */
 export async function renderStoryCard(m: PublicMessage): Promise<Blob> {
   const style = cardStyle(m);
+  const env = envelopeColors(style);
   const memory = Boolean(m.inMemory);
-  const fonts: Fonts = {
-    plex: cssFamily("--font-plex", '"IBM Plex Sans Arabic", system-ui, sans-serif'),
-    ruqaa: cssFamily("--font-ruqaa", '"Aref Ruqaa", serif'),
-  };
-  const [, icon] = await Promise.all([loadFonts(fonts), loadImage(ICONS[style.icon].local, 1500)]);
+  const fonts = fontsFromCss();
+  const [, logo, seal, icon] = await Promise.all([
+    loadFonts(fonts),
+    loadImage(LOGO_SRC, 1500),
+    loadImage(sealFor(m).local, 1500),
+    loadImage(ICONS[style.icon].local, 1500),
+  ]);
+  const img: Images = { logo, seal, icon };
 
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -566,17 +868,29 @@ export async function renderStoryCard(m: PublicMessage): Promise<Blob> {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("canvas 2d unavailable");
 
-  drawBackground(ctx, style, memory, seeded(m.id));
-  // Header, card and footer are centred as one group (short letters → shorter card).
-  const card = layoutCard(ctx, m, fonts);
-  const y0 = Math.max(90, (H - (card.h + HEADER_H + FOOTER_H)) / 2);
-  drawHeader(ctx, fonts, style, memory, y0);
-  drawCard(ctx, card, m, fonts, style, icon, y0 + HEADER_H);
-  drawFooter(ctx, fonts, style, y0 + HEADER_H + card.h);
+  const L = layout(ctx, m, fonts);
+  const paperGrain = grainPattern(ctx, INK.plum, 0.05);
+  const envGrain = grainPattern(ctx, INK.plum950, 0.08);
+
+  drawBackdrop(ctx, env);
+  if (envGrain) {
+    ctx.fillStyle = envGrain;
+    ctx.fillRect(0, 0, W, H);
+  }
+  drawOpenFlap(ctx, env, L.pocket);
+  drawSheet(ctx, L.pocket, paperGrain);
+  drawLetterhead(ctx, fonts, img.logo);
+  drawStampAndPostmark(ctx, fonts, style, img.icon, memory);
+  drawText(ctx, L, fonts, style);
+  drawPocket(ctx, env, L.pocket, envGrain);
+  // The rubber stamp lands across the sheet's bottom corner and the envelope edge.
+  drawRubberStamp(ctx, fonts, noEmoji(stampFor(m)), memory ? style.accent : mixHex(style.accent, INK.plum950, 0.1), TL + 190, L.pocket - 40);
+  drawWaxSeal(ctx, env, img.seal, memory, W / 2, L.pocket + 150, 86, m.id);
+  drawFooter(ctx, fonts, env, L.pocket);
   return canvasToBlob(canvas);
 }
 
-// Rendering takes a moment (fonts, icon); callers can warm it up on hover/focus
+// Rendering takes a moment (fonts, images); callers can warm it up on hover/focus
 // so the share sheet opens while the tap still counts as a user gesture.
 const blobs = new Map<string, Promise<Blob>>();
 
@@ -596,6 +910,11 @@ function storyBlob(m: PublicMessage): Promise<Blob> {
 export function prepareStoryCard(m: PublicMessage): void {
   if (typeof document === "undefined") return;
   storyBlob(m).catch(() => {});
+}
+
+/** The (cached) story image, e.g. for a thumbnail in the share sheet. */
+export function storyCardBlob(m: PublicMessage): Promise<Blob> {
+  return storyBlob(m);
 }
 
 function download(blob: Blob) {

@@ -53,18 +53,18 @@ type FakeWindow = ReturnType<typeof fakeBrowser>;
 /** Wires a fake browser to letterHistory the way LettersProvider does. */
 function setup(start: string) {
   let open: string | null = start.startsWith("/m/") ? start.slice(3) : null;
-  let nav!: ReturnType<typeof letterHistory>;
+  const ref: { nav?: ReturnType<typeof letterHistory> } = {};
   const w = fakeBrowser(start, (win) => {
     const m = win.location.pathname.match(/^\/m\/(.+)$/);
     if (m) {
-      nav.open(m[1], false, open !== null);
+      ref.nav?.open(m[1], false, open !== null);
       open = m[1];
     } else {
       open = null;
-      nav.popClosed();
+      ref.nav?.popClosed();
     }
   });
-  nav = letterHistory(w as unknown as HistoryWindow);
+  const nav = (ref.nav = letterHistory(w as unknown as HistoryWindow));
   return {
     w,
     openLetter(id: string) {

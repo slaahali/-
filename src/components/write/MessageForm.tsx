@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -17,8 +18,9 @@ import { useLetters } from "@/components/LettersProvider";
 import { GiftLink } from "@/components/layout/GiftLink";
 import { Icon3D } from "@/components/ui/Icon3D";
 import { createMessage } from "@/lib/api-client";
-import { CARD_COLORS, cardStyle } from "@/lib/assets";
+import { CARD_COLORS, cardStyle, type CardStyle } from "@/lib/assets";
 import { COPY } from "@/lib/config";
+import { play, preloadSounds } from "@/lib/sound";
 import { track } from "@/lib/track";
 import {
   LIMITS,
@@ -30,7 +32,6 @@ import {
   type PublicMessage,
   type TeacherTitle,
 } from "@/lib/types";
-import styles from "./fold.module.css";
 import {
   buildRequestBody,
   charCount,
@@ -38,6 +39,7 @@ import {
   DRAFT_KEY,
   firstInvalid,
   parseDraft,
+  prefillAction,
   serializeDraft,
   validateForm,
   wantsSurprise,
@@ -45,6 +47,7 @@ import {
   type FieldErrors,
   type FormFields,
 } from "./form-logic";
+import styles from "./sheet.module.css";
 import { SuccessPanel } from "./SuccessPanel";
 
 /** idle → submitting → sending (fold-and-fly) → done (success panel). */
@@ -57,8 +60,10 @@ const BODY_MAX = LIMITS.body.max;
 const BODY_WARN_AT = BODY_MAX - 60;
 const PLACEHOLDER_MS = 3500;
 const DRAFT_SAVE_MS = 500;
-const MEMORY_COLOR_NOTE = "رسائل «في ذكرى» تنعرض بلون هادئ موحّد 🤍";
+const MEMORY_COLOR_NOTE = "رسائل «في ذكرى» توصل بظرف هادئ موحّد";
 const MODERATION_FIELD_NOTE = "عدّل هذا الجزء شوي 🙏";
+/** Envelope before the random colour is picked (server render). */
+const NEUTRAL_ENVELOPE: Pick<CardStyle, "gradient"> = { gradient: ["#f4ece0", "#d9bfa3"] };
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -89,7 +94,7 @@ function clearDraft() {
   }
 }
 
-/** A random card colour, kept for the whole visit so the paper doesn't change on reload. */
+/** A random card colour, kept for the whole visit so the envelope doesn't change on reload. */
 function sessionColor(): number {
   try {
     const stored = window.sessionStorage.getItem(COLOR_KEY);
@@ -191,6 +196,8 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
   const [motion, setMotion] = useState<"fold" | "fade">("fold");
   const [sent, setSent] = useState<Sent | null>(null);
   const [resetTick, setResetTick] = useState(0);
+  /** A search CTA asked for a letter to someone else while an unfinished one is on the paper. */
+  const [readdress, setReaddress] = useState<string | null>(null);
 
   const formRef = useRef<HTMLFormElement>(null);
   const toNameRef = useRef<HTMLInputElement>(null);
@@ -198,6 +205,7 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const fromNameRef = useRef<HTMLInputElement>(null);
   const contactRef = useRef<HTMLInputElement>(null);
+  const readdressRef = useRef<HTMLButtonElement>(null);
   const saveTimer = useRef<number | undefined>(undefined);
   const inFlight = useRef(false);
 
@@ -215,23 +223,38 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
     return () => window.clearTimeout(saveTimer.current);
   }, [hydrated, title, toName, school, body, fromName, variant, inMemory, surpriseOptIn, phase]);
 
-  // "اكتب له رسالة" from the search empty state: adjust state while rendering…
+  // Search CTAs ("اكتب رسالة لـ «…»"): adjust state while rendering…
   const [prefillSeen, setPrefillSeen] = useState<number | null>(null);
   if (prefill && prefill.nonce !== prefillSeen) {
     setPrefillSeen(prefill.nonce);
-    setToName(clampChars(prefill.toName.trim(), LIMITS.toName.max));
-    setTitle(null);
-    setErrors((e) => omit(e, "toName"));
+    // After a send the fields are already blank underneath the success panel.
     if (phase === "done") {
       setPhase("idle");
       setSent(null);
+    }
+    const blank = phase === "done";
+    const action = prefillAction(
+      prefill.toName,
+      { toName: blank ? "" : toName, body: blank ? "" : body },
+      LIMITS.toName.max,
+    );
+    if (action.kind === "set") {
+      setToName(action.toName);
+      if (action.clearTitle) setTitle(null);
+      setErrors((e) => omit(e, "toName"));
+      setReaddress(null);
+    } else if (action.kind === "ask") {
+      setReaddress(action.toName);
     }
   }
   // …then focus the next thing to fill once the provider's smooth scroll is under way.
   useEffect(() => {
     if (!prefill) return;
-    const target = prefill.toName.trim() ? bodyRef : toNameRef;
-    const t = window.setTimeout(() => target.current?.focus({ preventScroll: true }), 80);
+    const t = window.setTimeout(() => {
+      const target =
+        readdressRef.current ?? (toNameRef.current?.value.trim() ? bodyRef.current : toNameRef.current);
+      target?.focus({ preventScroll: true });
+    }, 80);
     return () => window.clearTimeout(t);
   }, [prefill]);
 
@@ -252,6 +275,7 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
     setSurpriseOptIn(false);
     setContact("");
     setWebsite("");
+    setReaddress(null);
   }, []);
 
   // The sent letter now lives in `sent`; the form underneath starts blank again
@@ -290,10 +314,27 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
     setResetTick((n) => n + 1);
   }, [clearFields]);
 
+  const startReaddressed = () => {
+    if (!readdress) return;
+    const name = readdress;
+    clearFields();
+    setErrors({});
+    setFlagged([]);
+    setToName(name);
+    window.setTimeout(() => bodyRef.current?.focus(), 0);
+  };
+
+  const keepDraft = () => {
+    setReaddress(null);
+    window.setTimeout(() => bodyRef.current?.focus(), 0);
+  };
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     // The ref also stops a double tap that lands before React re-renders.
     if (phase !== "idle" || inFlight.current) return;
+    // Wakes the audio context inside the tap (iOS), so the whoosh can play after the request.
+    preloadSounds();
 
     const fields: FormFields = {
       title,
@@ -336,6 +377,7 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
       setSent({ message: res.message, status: res.status });
       setMotion(reducedMotion() ? "fade" : "fold");
       setPhase("sending");
+      void play("send");
       return;
     }
 
@@ -365,7 +407,9 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
   }
 
   const look = variant === null && !inMemory ? null : cardStyle({ variant: variant ?? 0, inMemory });
+  const envelope = look ?? NEUTRAL_ENVELOPE;
   const busy = phase !== "idle";
+  const sending = phase === "sending";
   const errorText = (f: InputField) =>
     errors[f] ?? (flagged.includes(f as Field) ? MODERATION_FIELD_NOTE : undefined);
   const isInvalid = (f: InputField) => Boolean(errorText(f));
@@ -383,310 +427,288 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
       noValidate
       aria-label="رسالتك لمعلمك"
       onSubmit={handleSubmit}
-      inert={phase === "sending"}
-      onAnimationEnd={(e) => {
-        if (e.target === e.currentTarget) finishSending();
-      }}
-      className={`paper ${styles.sheet} relative mt-6 scroll-mt-24 ps-[2.3rem] pe-4 pt-10 pb-6 sm:ps-[3.35rem] sm:pe-8 sm:pt-12 sm:pb-8 lg:mt-0 ${
-        phase === "sending" ? (motion === "fold" ? styles.fold : styles.fade) : ""
-      }`}
-      style={{ backgroundColor: look?.bg ?? "var(--color-paper)" }}
+      inert={sending}
+      className="relative scroll-mt-24"
     >
-      {/* Wax seal in the chosen accent (a dove for «في ذكرى»). */}
-      <span
-        aria-hidden
-        className={`${styles.seal} absolute -top-6 end-5 grid size-14 place-items-center rounded-full border-2 border-white/35 text-white shadow-[0_10px_20px_-8px_rgb(42_20_34/0.45)] sm:end-8`}
-        style={{
-          backgroundColor: look?.accent ?? "var(--color-orange)",
-          transform: `rotate(${inMemory ? 0 : -12}deg)`,
-        }}
+      <div
+        className={styles.stage}
+        style={{ "--env": envelope.gradient[0], "--env-in": envelope.gradient[1] } as CSSProperties}
       >
-        {inMemory ? <span className="text-2xl leading-none">🕊️</span> : <HeartIcon className="size-6" />}
-      </span>
-
-      <div className="space-y-7">
-        {/* To: title chips + name */}
-        <div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
-            <label
-              htmlFor={id("toName")}
-              className="font-hand text-[2rem] leading-none font-bold text-plum"
-            >
-              {COPY.labelTo}
-              <span className="visually-hidden"> {COPY.placeholderTo}</span>
-            </label>
-            <div
-              role="radiogroup"
-              aria-label={`${COPY.labelTitle} (${COPY.optional})`}
-              onKeyDown={(e) => {
-                const i = roveRadio(e);
-                if (i !== null) setTitle(TEACHER_TITLE_KEYS[i]);
-              }}
-              className="flex flex-wrap gap-1.5"
-            >
-              {TEACHER_TITLE_KEYS.map((key, i) => {
-                const checked = title === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    role="radio"
-                    aria-checked={checked}
-                    tabIndex={checked || (title === null && i === 0) ? 0 : -1}
-                    onClick={() => setTitle(checked ? null : key)}
-                    className="chip min-h-11 px-3.5"
-                  >
-                    {TEACHER_TITLES[key]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <input
-            ref={toNameRef}
-            id={id("toName")}
-            name="toName"
-            type="text"
-            required
-            aria-required
-            aria-invalid={isInvalid("toName")}
-            aria-describedby={describedBy("toName")}
-            maxLength={LIMITS.toName.max}
-            autoComplete="off"
-            enterKeyHint="next"
-            placeholder={COPY.placeholderTo}
-            value={toName}
-            onChange={(e) => {
-              setToName(e.target.value);
-              dropError("toName");
-            }}
-            className="field mt-3 text-[1.05rem] font-semibold"
-          />
-          <FieldError id={id("toName-error")} message={errorText("toName")} />
-        </div>
-
-        {/* School / university */}
-        <div>
-          <label htmlFor={id("school")} className="field-label">
-            {COPY.labelSchool} <span className="field-optional">{COPY.optional}</span>
-          </label>
-          <input
-            ref={schoolRef}
-            id={id("school")}
-            name="school"
-            type="text"
-            aria-invalid={isInvalid("school")}
-            aria-describedby={describedBy("school")}
-            maxLength={LIMITS.school.max}
-            autoComplete="off"
-            enterKeyHint="next"
-            placeholder={COPY.placeholderSchool}
-            value={school}
-            onChange={(e) => {
-              setSchool(e.target.value);
-              dropError("school");
-            }}
-            className="field"
-          />
-          <FieldError id={id("school-error")} message={errorText("school")} />
-        </div>
-
-        <BodyField
-          id={id("body")}
-          textareaRef={bodyRef}
-          value={body}
-          invalid={isInvalid("body")}
-          error={<FieldError id={id("body-error")} message={errorText("body")} />}
-          describedBy={describedBy("body", id("body-hint"))}
-          hintId={id("body-hint")}
-          onChange={(v) => {
-            setBody(v);
-            dropError("body");
+        <div
+          className={`${styles.sheet} ${sending ? (motion === "fold" ? styles.fold : styles.fade) : ""}`}
+          onAnimationEnd={(e) => {
+            if (e.target === e.currentTarget) finishSending();
           }}
-        />
-
-        {/* Sender */}
-        <div>
-          <label htmlFor={id("fromName")} className="field-label">
-            {COPY.labelFrom} <span className="field-optional">{COPY.optional}</span>
-          </label>
-          <input
-            ref={fromNameRef}
-            id={id("fromName")}
-            name="fromName"
-            type="text"
-            aria-invalid={isInvalid("fromName")}
-            aria-describedby={describedBy("fromName")}
-            maxLength={LIMITS.fromName.max}
-            autoComplete="name"
-            enterKeyHint="done"
-            placeholder={COPY.placeholderFrom}
-            value={fromName}
-            onChange={(e) => {
-              setFromName(e.target.value);
-              dropError("fromName");
-            }}
-            className="field"
-          />
-          <FieldError id={id("fromName-error")} message={errorText("fromName")} />
-        </div>
-
-        {/* Card colour */}
-        <div>
-          <p id={id("color-label")} className="field-label">
-            {COPY.labelColor}
-            {look && !inMemory && <span className="field-optional">· {look.name}</span>}
+        >
+          <p aria-hidden className="text-end text-[0.85rem] font-bold text-ink-mute">
+            {COPY.badge}
           </p>
-          <div
-            role="radiogroup"
-            aria-labelledby={id("color-label")}
-            aria-describedby={inMemory ? id("color-note") : undefined}
-            aria-disabled={inMemory || undefined}
-            onKeyDown={(e) => {
-              const i = roveRadio(e);
-              if (i !== null) setVariant(i);
-            }}
-            className={`-ms-1.5 flex flex-wrap gap-[3px] transition-[opacity,filter] duration-300 ${
-              inMemory ? "opacity-45 grayscale" : ""
-            }`}
-          >
-            {CARD_COLORS.map((c, i) => {
-              const checked = !inMemory && variant === i;
-              return (
+
+          {readdress && (
+            <div
+              role="status"
+              className="mt-3 rounded-lg border border-dashed border-orange-300 bg-orange-50/70 px-3.5 py-3 text-[0.95rem] leading-7 text-plum"
+            >
+              <p>عندك رسالة ما كملتها لـ «{toName.trim()}».</p>
+              <div className="mt-1 flex flex-wrap gap-x-4">
                 <button
-                  key={c.key}
+                  ref={readdressRef}
                   type="button"
-                  role="radio"
-                  aria-checked={checked}
-                  aria-label={c.name}
-                  title={c.name}
-                  disabled={inMemory}
-                  tabIndex={checked || (variant === null && i === 0) ? 0 : -1}
-                  onClick={() => setVariant(i)}
-                  className="group grid size-11 place-items-center rounded-full disabled:cursor-not-allowed"
+                  onClick={startReaddressed}
+                  className="inline-flex min-h-11 items-center font-bold text-orange-700 underline decoration-orange-300 decoration-2 underline-offset-[6px]"
                 >
-                  <span
-                    aria-hidden
-                    className="grid size-8 place-items-center rounded-full transition-[box-shadow,transform] duration-200 group-hover:scale-110 group-active:scale-95 group-disabled:scale-100"
-                    style={{
-                      background: `linear-gradient(140deg, ${c.gradient[0]}, ${c.gradient[1]})`,
-                      boxShadow: checked
-                        ? "0 0 0 3px var(--color-paper), 0 0 0 5.5px var(--color-plum)"
-                        : "inset 0 0 0 1px rgb(42 20 34 / 0.14)",
-                    }}
-                  >
-                    {checked && <CheckIcon className="size-4 text-white drop-shadow-[0_1px_1px_rgb(0_0_0/0.4)]" />}
-                  </span>
+                  ابدأ رسالة جديدة لـ «{readdress}»
                 </button>
-              );
-            })}
-          </div>
-          {inMemory && (
-            <p id={id("color-note")} className="mt-1 text-sm text-ink-soft">
-              {MEMORY_COLOR_NOTE}
-            </p>
-          )}
-        </div>
-
-        {/* «في ذكرى» switch */}
-        <label className="flex cursor-pointer items-start gap-3.5 rounded-2xl border border-line bg-white/65 p-4 transition-colors hover:border-plum-200">
-          <input
-            type="checkbox"
-            role="switch"
-            checked={inMemory}
-            onChange={(e) => setInMemory(e.target.checked)}
-            aria-describedby={id("memory-hint")}
-            className="peer sr-only"
-          />
-          {/* Track colour = MEMORY_STYLE.accent */}
-          <span
-            aria-hidden
-            className="relative mt-0.5 h-7 w-12 shrink-0 rounded-full bg-line-strong transition-colors duration-300 peer-checked:bg-[#6f6275] peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-orange after:absolute after:start-0.5 after:top-0.5 after:size-6 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-300 peer-checked:after:-translate-x-5"
-          />
-          <span className="min-w-0">
-            <span className="flex items-center gap-2 font-bold text-plum">
-              {COPY.labelMemory}
-              {inMemory && (
-                <span aria-hidden className="animate-fade-up text-lg leading-none">
-                  🕊️
-                </span>
-              )}
-            </span>
-            <span id={id("memory-hint")} className="mt-0.5 block text-sm leading-6 text-ink-soft">
-              {COPY.memoryHint}
-            </span>
-          </span>
-        </label>
-
-        {/* Surprise opt-in (not offered for «في ذكرى» letters) */}
-        {showSurprise && (
-          <div className="rounded-[1.25rem] border border-orange-100 bg-orange-50/85 p-4 sm:p-5">
-            <div className="flex items-start gap-3.5">
-              <Icon3D name="gift" size={64} className="-mt-1 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-bold text-plum">{COPY.surpriseTitle}</p>
-                <p className="mt-1 text-sm leading-6 text-ink-soft">{COPY.surpriseLead}</p>
+                <button
+                  type="button"
+                  onClick={keepDraft}
+                  className="inline-flex min-h-11 items-center font-bold text-plum"
+                >
+                  أكمّل رسالتي
+                </button>
               </div>
             </div>
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 font-semibold text-plum">
-              <input
-                type="checkbox"
-                checked={surpriseOptIn}
-                onChange={(e) => {
-                  setSurpriseOptIn(e.target.checked);
-                  if (!e.target.checked) dropError("contact");
-                }}
-                aria-controls={id("contact-wrap")}
-                className="size-5 shrink-0 accent-orange"
-              />
-              {COPY.surpriseOptIn}
+          )}
+
+          {/* «إلى [اللقب ▾] [الاسم]» */}
+          <div className="mt-2 flex flex-wrap items-end gap-x-2.5">
+            <label htmlFor={id("toName")} className={styles.word}>
+              {COPY.letterTo}
+              <span className="visually-hidden"> {COPY.labelToName}</span>
             </label>
-            <div
-              id={id("contact-wrap")}
-              inert={!surpriseOptIn}
-              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out-soft ${
-                surpriseOptIn ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-              }`}
+            <select
+              aria-label={`${COPY.labelTitle} (${COPY.optional})`}
+              value={title ?? ""}
+              data-empty={title === null}
+              onChange={(e) => setTitle((e.target.value || null) as TeacherTitle | null)}
+              className={`${styles.blank} ${styles.select} shrink-0`}
             >
-              <div className="-mx-1.5 overflow-hidden px-1.5">
-                <div className="pt-2 pb-1.5">
-                  <label htmlFor={id("contact")} className="field-label">
-                    {COPY.labelContact}
-                  </label>
+              <option value="">{COPY.labelTitle}</option>
+              {TEACHER_TITLE_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {TEACHER_TITLES[key]}
+                </option>
+              ))}
+            </select>
+            <input
+              ref={toNameRef}
+              id={id("toName")}
+              name="toName"
+              type="text"
+              required
+              aria-required
+              aria-invalid={isInvalid("toName")}
+              aria-describedby={describedBy("toName")}
+              maxLength={LIMITS.toName.max}
+              autoComplete="off"
+              enterKeyHint="next"
+              placeholder={COPY.placeholderTo}
+              value={toName}
+              onChange={(e) => {
+                setToName(e.target.value);
+                dropError("toName");
+              }}
+              className={`${styles.blank} ${styles.name} min-w-[8.5rem] flex-1`}
+            />
+          </div>
+          <FieldError id={id("toName-error")} message={errorText("toName")} />
+
+          {/* «في [المدرسة / الجامعة]» */}
+          <div className="mt-1 flex items-end gap-x-2.5">
+            <label htmlFor={id("school")} className={styles.word}>
+              {COPY.letterIn}
+              <span className="visually-hidden">
+                {" "}
+                {COPY.labelSchool} ({COPY.optional})
+              </span>
+            </label>
+            <input
+              ref={schoolRef}
+              id={id("school")}
+              name="school"
+              type="text"
+              aria-invalid={isInvalid("school")}
+              aria-describedby={describedBy("school")}
+              maxLength={LIMITS.school.max}
+              autoComplete="off"
+              enterKeyHint="next"
+              placeholder={COPY.placeholderSchool}
+              value={school}
+              onChange={(e) => {
+                setSchool(e.target.value);
+                dropError("school");
+              }}
+              className={`${styles.blank} flex-1`}
+            />
+          </div>
+          <FieldError id={id("school-error")} message={errorText("school")} />
+
+          <BodyField
+            id={id("body")}
+            textareaRef={bodyRef}
+            value={body}
+            invalid={isInvalid("body")}
+            error={<FieldError id={id("body-error")} message={errorText("body")} />}
+            describedBy={describedBy("body", id("body-hint"))}
+            hintId={id("body-hint")}
+            onChange={(v) => {
+              setBody(v);
+              dropError("body");
+            }}
+          />
+
+          {/* «من: [اسمك]» — the signature, at the end of the letter. */}
+          <div className="mt-4 sm:ms-auto sm:max-w-[21rem]">
+            <div className="flex items-end gap-x-2.5">
+              <label htmlFor={id("fromName")} className={styles.word}>
+                {COPY.letterFrom}
+                <span className="visually-hidden">
+                  {" "}
+                  {COPY.labelFrom} ({COPY.optional})
+                </span>
+              </label>
+              <input
+                ref={fromNameRef}
+                id={id("fromName")}
+                name="fromName"
+                type="text"
+                aria-invalid={isInvalid("fromName")}
+                aria-describedby={describedBy("fromName")}
+                maxLength={LIMITS.fromName.max}
+                autoComplete="name"
+                enterKeyHint="done"
+                placeholder={COPY.placeholderFrom}
+                value={fromName}
+                onChange={(e) => {
+                  setFromName(e.target.value);
+                  dropError("fromName");
+                }}
+                className={`${styles.blank} ${styles.signature} flex-1`}
+              />
+            </div>
+            <FieldError id={id("fromName-error")} message={errorText("fromName")} />
+          </div>
+        </div>
+
+        {/* The envelope's pocket in the writer's colour: the sheet stands in it. */}
+        <div aria-hidden className={`${styles.pocket} ${sending ? styles.awayLate : ""}`}>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none">
+            <path d="M0 0 L35.6 19.9 M100 0 L64.4 19.9" fill="none" stroke="rgb(42 20 34 / 0.16)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            <path d="M0 40 L47 13.5 Q50 11.8 53 13.5 L100 40 Z" fill="currentColor" opacity="0.55" />
+            <path d="M0 40 L47 13.5 Q50 11.8 53 13.5 L100 40" fill="none" stroke="rgb(255 255 255 / 0.4)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          </svg>
+        </div>
+      </div>
+
+      <div className={`mt-8 space-y-7 ${sending ? styles.away : ""}`}>
+        <EnvelopePicker
+          labelId={id("color-label")}
+          noteId={id("color-note")}
+          variant={variant}
+          inMemory={inMemory}
+          look={look}
+          onPick={setVariant}
+        />
+
+        {/* خيارات: «في ذكرى» + the surprise opt-in */}
+        <div role="group" aria-labelledby={id("options")}>
+          <p id={id("options")} className="eyebrow text-plum">
+            {COPY.labelOptions}
+          </p>
+
+          <label className="mt-3 flex cursor-pointer items-start gap-3.5 py-1">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={inMemory}
+              onChange={(e) => setInMemory(e.target.checked)}
+              aria-describedby={id("memory-hint")}
+              className="peer sr-only"
+            />
+            {/* Track colour = MEMORY_STYLE.accent */}
+            <span
+              aria-hidden
+              className="relative mt-0.5 h-7 w-12 shrink-0 rounded-full bg-line-strong transition-colors duration-300 peer-checked:bg-[#6f6275] peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-orange after:absolute after:start-0.5 after:top-0.5 after:size-6 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-300 peer-checked:after:-translate-x-5"
+            />
+            <span className="min-w-0">
+              <span className="block font-bold text-plum">{COPY.labelMemory}</span>
+              <span id={id("memory-hint")} className="block text-[0.95rem] leading-7 text-ink-soft">
+                {COPY.memoryHint}
+              </span>
+            </span>
+          </label>
+
+          {/* Surprise opt-in (not offered for «في ذكرى» letters) */}
+          {showSurprise && (
+            <div className="mt-4 flex items-start gap-3.5 border-t border-dashed border-line-strong pt-4">
+              <Icon3D name="gift" size={48} className="-mt-1 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-plum">{COPY.surpriseTitle}</p>
+                <p id={id("surprise-lead")} className="text-[0.95rem] leading-7 text-ink-soft">
+                  {COPY.surpriseLead}
+                </p>
+                <label className="mt-1 flex min-h-11 cursor-pointer items-center gap-3 font-bold text-plum">
                   <input
-                    ref={contactRef}
-                    id={id("contact")}
-                    name="contact"
-                    type="text"
-                    inputMode="text"
-                    autoComplete="on"
-                    dir="ltr"
-                    required={surpriseOptIn}
-                    aria-required={surpriseOptIn}
-                    aria-invalid={isInvalid("contact")}
-                    aria-describedby={describedBy("contact", id("contact-privacy"))}
-                    maxLength={LIMITS.contact.max}
-                    placeholder={COPY.placeholderContact}
-                    value={contact}
+                    type="checkbox"
+                    checked={surpriseOptIn}
                     onChange={(e) => {
-                      setContact(e.target.value);
-                      dropError("contact");
+                      setSurpriseOptIn(e.target.checked);
+                      if (!e.target.checked) dropError("contact");
                     }}
-                    className="field text-start"
+                    aria-controls={id("contact-wrap")}
+                    aria-describedby={id("surprise-lead")}
+                    className="size-5 shrink-0 accent-orange"
                   />
-                  <FieldError id={id("contact-error")} message={errorText("contact")} />
-                  <p
-                    id={id("contact-privacy")}
-                    className="mt-2 flex items-start gap-1.5 text-[0.8rem] leading-5 text-ink-soft"
-                  >
-                    <LockIcon className="mt-0.5 size-3.5 shrink-0 text-plum" />
-                    {COPY.contactPrivacy}
-                  </p>
+                  {COPY.surpriseOptIn}
+                </label>
+                <div
+                  id={id("contact-wrap")}
+                  inert={!surpriseOptIn}
+                  className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out-soft ${
+                    surpriseOptIn ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                  }`}
+                >
+                  <div className="-mx-1.5 overflow-hidden px-1.5">
+                    <div className="pt-1 pb-1.5">
+                      <label htmlFor={id("contact")} className="field-label">
+                        {COPY.labelContact}
+                      </label>
+                      <input
+                        ref={contactRef}
+                        id={id("contact")}
+                        name="contact"
+                        type="text"
+                        inputMode="text"
+                        autoComplete="on"
+                        dir="ltr"
+                        required={surpriseOptIn}
+                        aria-required={surpriseOptIn}
+                        aria-invalid={isInvalid("contact")}
+                        aria-describedby={describedBy("contact", id("contact-privacy"))}
+                        maxLength={LIMITS.contact.max}
+                        placeholder={COPY.placeholderContact}
+                        value={contact}
+                        onChange={(e) => {
+                          setContact(e.target.value);
+                          dropError("contact");
+                        }}
+                        className="field font-latin text-start"
+                      />
+                      <FieldError id={id("contact-error")} message={errorText("contact")} />
+                      <p
+                        id={id("contact-privacy")}
+                        className="mt-2 flex items-start gap-1.5 text-[0.85rem] leading-6 text-ink-soft"
+                      >
+                        <LockIcon className="mt-1 size-3.5 shrink-0 text-plum" />
+                        {COPY.contactPrivacy}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Honeypot: real visitors never see or fill it. */}
         <div aria-hidden="true" className="visually-hidden">
@@ -707,34 +729,23 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
           <div
             role="alert"
             id={id("banner")}
-            className={`flex items-start gap-2.5 rounded-2xl border px-4 py-3 text-[0.95rem] leading-7 font-semibold ${
+            className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-[0.95rem] leading-7 font-bold ${
               banner.tone === "warn"
                 ? "border-orange-100 bg-orange-50 text-orange-700"
                 : "border-plum-100 bg-plum-50 text-plum"
             }`}
           >
-            <span aria-hidden className="text-lg">
-              {banner.tone === "warn" ? "✋" : "💜"}
-            </span>
+            <NoteIcon className="mt-1.5 size-4 shrink-0" />
             <span>{banner.message}</span>
           </div>
         )}
 
-        <div className="flex flex-col-reverse items-stretch gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
-          {!inMemory ? (
-            <GiftLink
-              from="form"
-              className="inline-flex min-h-11 items-center justify-center gap-1.5 self-center rounded-full px-3 font-bold text-orange-700 underline-offset-4 transition-colors hover:text-orange-600 hover:underline sm:-ms-3 sm:self-auto"
-            >
-              {giftLabel}
-            </GiftLink>
-          ) : (
-            <span className="hidden sm:block" />
-          )}
+        {/* Submit first in the DOM so keyboard order matches what's seen on every size. */}
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-5">
           <button
             type="submit"
             aria-disabled={busy || undefined}
-            className={`btn btn-primary w-full text-[1.05rem] sm:w-auto sm:min-w-[11rem] ${
+            className={`btn btn-primary w-full text-[1.05rem] sm:w-auto sm:min-w-[12rem] ${
               busy ? "cursor-progress opacity-85" : ""
             }`}
           >
@@ -750,6 +761,14 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
               </>
             )}
           </button>
+          {!inMemory && (
+            <GiftLink
+              from="form"
+              className="inline-flex min-h-11 items-center justify-center self-center rounded-xl px-3 font-bold text-orange-700 underline decoration-orange-300 decoration-2 underline-offset-[6px] transition-colors hover:decoration-orange-700 sm:self-auto"
+            >
+              {giftLabel}
+            </GiftLink>
+          )}
         </div>
       </div>
     </form>
@@ -765,7 +784,94 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   );
 }
 
-/** Auto-growing message box with a live counter and rotating writing prompts. */
+/** «لون الظرف»: six small envelopes instead of colour dots. */
+function EnvelopePicker({
+  labelId,
+  noteId,
+  variant,
+  inMemory,
+  look,
+  onPick,
+}: {
+  labelId: string;
+  noteId: string;
+  variant: number | null;
+  inMemory: boolean;
+  look: CardStyle | null;
+  onPick: (v: number) => void;
+}) {
+  return (
+    <div>
+      <p id={labelId} className="eyebrow text-plum">
+        {COPY.labelColor}
+        {look && !inMemory && <span className="font-medium text-ink-soft">· {look.name}</span>}
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby={labelId}
+        aria-describedby={inMemory ? noteId : undefined}
+        aria-disabled={inMemory || undefined}
+        onKeyDown={(e) => {
+          const i = roveRadio(e);
+          if (i !== null) onPick(i);
+        }}
+        className={`mt-2 flex flex-wrap gap-1.5 transition-[opacity,filter] duration-300 ${
+          inMemory ? "opacity-45 grayscale" : ""
+        }`}
+      >
+        {CARD_COLORS.map((c, i) => {
+          const checked = !inMemory && variant === i;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              aria-label={c.name}
+              title={c.name}
+              disabled={inMemory}
+              tabIndex={checked || (variant === null && i === 0) ? 0 : -1}
+              onClick={() => onPick(i)}
+              className={styles.swatch}
+            >
+              <EnvelopeGlyph colors={c.gradient} checked={checked} />
+            </button>
+          );
+        })}
+      </div>
+      {inMemory && (
+        <p id={noteId} className="mt-1 text-[0.95rem] text-ink-soft">
+          {MEMORY_COLOR_NOTE}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function EnvelopeGlyph({ colors: [light, deep], checked }: { colors: [string, string]; checked: boolean }) {
+  return (
+    <svg aria-hidden viewBox="0 0 44 32" className="h-[1.9rem] w-[2.6rem]">
+      <rect x="1" y="1" width="42" height="30" rx="3" fill={light} stroke="rgb(42 20 34 / 0.16)" />
+      <path d="M1.6 30.4 17 16.5M42.4 30.4 27 16.5" stroke="rgb(42 20 34 / 0.14)" strokeWidth="1.2" />
+      <path d="M1.8 1.8 20.3 17.2a2.6 2.6 0 0 0 3.4 0L42.2 1.8Z" fill={deep} />
+      {checked && (
+        <>
+          <circle cx="22" cy="17.3" r="6.2" fill="#fffdf8" />
+          <path
+            d="M19 17.4l2.1 2.1 4-4.2"
+            fill="none"
+            stroke="#691d4e"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Auto-growing ruled message area with a live counter and rotating writing prompts. */
 function BodyField({
   id,
   textareaRef,
@@ -807,8 +913,8 @@ function BodyField({
   }, [value, textareaRef]);
 
   return (
-    <div>
-      <label htmlFor={id} className="field-label">
+    <div className="mt-5">
+      <label htmlFor={id} className="mb-1 block text-[0.95rem] font-bold text-ink-soft">
         {COPY.labelBody}
       </label>
       <textarea
@@ -825,14 +931,14 @@ function BodyField({
         onChange={(e) => onChange(clampChars(e.target.value, BODY_MAX))}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        className="field block resize-none overflow-hidden text-[1.05rem] leading-8"
+        className={styles.ruled}
       />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">{error}</div>
         <span
           aria-hidden
           dir="ltr"
-          className={`mt-1.5 shrink-0 text-xs font-semibold tabular-nums transition-colors ${
+          className={`mt-1.5 shrink-0 text-[0.8rem] font-bold tabular-nums transition-colors ${
             count > BODY_WARN_AT ? "text-orange-700" : "text-ink-mute"
           }`}
         >
@@ -848,27 +954,12 @@ function BodyField({
 
 type IconProps = { className?: string };
 
-function HeartIcon({ className }: IconProps) {
+function NoteIcon({ className }: IconProps) {
   return (
-    <svg aria-hidden viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M12 20.7l-1.4-1.3C5.4 14.7 2 11.6 2 7.8 2 4.7 4.4 2.3 7.5 2.3c1.7 0 3.4.8 4.5 2.1 1.1-1.3 2.8-2.1 4.5-2.1 3.1 0 5.5 2.4 5.5 5.5 0 3.8-3.4 6.9-8.6 11.6L12 20.7z" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: IconProps) {
-  return (
-    <svg
-      aria-hidden
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M5 12.5l4.2 4.2L19 7" />
+    <svg aria-hidden viewBox="0 0 16 16" fill="none" className={className}>
+      <circle cx="8" cy="8" r="6.8" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 4.6v4.1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="8" cy="11.3" r="1" fill="currentColor" />
     </svg>
   );
 }

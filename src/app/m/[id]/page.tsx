@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { CampaignPage } from "@/components/CampaignPage";
 import { COPY } from "@/lib/config";
-import { getInitialWall, getPublicMessage } from "@/lib/data";
+import { getInitialWall, getPublicMessage, getSceneLetters } from "@/lib/data";
 import { displayTo, excerpt } from "@/lib/format";
 
 // generateMetadata and the page both need the letter: one lookup per request.
@@ -42,13 +42,17 @@ export async function generateMetadata({ params }: PageProps<"/m/[id]">): Promis
 
 export default async function LetterPage({ params }: PageProps<"/m/[id]">) {
   const { id } = await params;
-  const [message, wall] = await Promise.all([loadMessage(id), getInitialWall()]);
+  const [message, wall, heroLetters] = await Promise.all([
+    loadMessage(id),
+    getInitialWall(),
+    getSceneLetters(),
+  ]);
   if (!message) notFound();
 
   return (
     <CampaignPage
       initial={wall}
-      heroLetters={wall.items}
+      heroLetters={heroLetters}
       initialOpen={message}
       total={wall.total}
     />

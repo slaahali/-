@@ -1,12 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, type CSSProperties } from "react";
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useLetters } from "@/components/LettersProvider";
-import { Icon3D } from "@/components/ui/Icon3D";
-import type { IconName } from "@/lib/assets";
 import { COPY } from "@/lib/config";
 import { formatCount, toSceneLetter } from "@/lib/format";
+import { track } from "@/lib/track";
 import type { PublicMessage } from "@/lib/types";
 
 const LettersScene = dynamic(() => import("@/components/scene/LettersScene"), {
@@ -14,48 +13,51 @@ const LettersScene = dynamic(() => import("@/components/scene/LettersScene"), {
   loading: () => null,
 });
 
+const loadImmersive = () => import("@/components/scene/ImmersiveLetters");
+// Fetched on first hover/focus of the CTA, mounted on first open.
+const ImmersiveLetters = dynamic(loadImmersive, { ssr: false, loading: () => null });
+
 const MAX_SCENE_LETTERS = 40;
 
-/** Always-on CSS layer so the hero never looks empty (before WebGL loads, or without it). */
-const FLOATERS: ReadonlyArray<{
-  name: IconName;
-  size: number;
-  /** Position + responsive size/visibility (smaller and fewer on phones). */
-  cls: string;
-  r: string;
-  delay: string;
-}> = [
-  { name: "letter", size: 104, cls: "top-[10%] start-[1%] scale-[0.55] md:top-[16%] md:start-[3%] md:scale-100", r: "-10deg", delay: "0s" },
-  { name: "plane", size: 92, cls: "top-[11%] end-[1%] scale-[0.55] md:top-[19%] md:end-[4%] md:scale-100", r: "8deg", delay: "-2.4s" },
-  { name: "pencil", size: 84, cls: "hidden bottom-[13%] start-[7%] md:block", r: "14deg", delay: "-4.1s" },
-  { name: "heart", size: 88, cls: "bottom-[6%] end-[2%] scale-[0.55] md:bottom-[10%] md:end-[6%] md:scale-100", r: "-6deg", delay: "-1.2s" },
-  { name: "books", size: 96, cls: "hidden top-[48%] end-[1.5%] lg:block", r: "-4deg", delay: "-5.3s" },
-];
-
-// "كلنا كان لنا" + a handwritten, highlighted last word ("معلّم").
+// "كلنا كان لنا" + the emphasised last word ("معلّم"). At display size the
+// font lifts the shadda into the line above, so the big word drops it.
 const TITLE_WORDS = COPY.heroTitle.trim().split(/\s+/);
-const TITLE_LAST = TITLE_WORDS.pop() ?? "";
+const TITLE_LAST = (TITLE_WORDS.pop() ?? "").replace(/\u0651/g, "");
 const TITLE_START = TITLE_WORDS.join(" ");
 
 const fade = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
 export function Hero({ letters }: { letters: PublicMessage[] }) {
-  const { total, openLetter, hiddenIds, openMessage } = useLetters();
+  const { total, openLetter, hiddenIds, openMessage, remember } = useLetters();
+  const [immersiveOpen, setImmersiveOpen] = useState(false);
+  const [immersiveMounted, setImmersiveMounted] = useState(false);
+  const exploreRef = useRef<HTMLButtonElement>(null);
+
+  const visible = useMemo(() => letters.filter((m) => !hiddenIds.has(m.id)), [letters, hiddenIds]);
   const sceneLetters = useMemo(
-    () =>
-      letters
-        .filter((m) => !hiddenIds.has(m.id))
-        .slice(0, MAX_SCENE_LETTERS)
-        .map(toSceneLetter),
-    [letters, hiddenIds],
+    () => visible.slice(0, MAX_SCENE_LETTERS).map(toSceneLetter),
+    [visible],
   );
+
+  const openImmersive = () => {
+    setImmersiveMounted(true);
+    setImmersiveOpen(true);
+    track("immersive_open", {});
+  };
+
+  const closeImmersive = useCallback(() => {
+    setImmersiveOpen(false);
+    exploreRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const [first, second] = COPY.heroLead;
 
   return (
     <section
       aria-labelledby="hero-title"
-      className="relative isolate flex min-h-[88svh] flex-col overflow-hidden md:min-h-[92vh]"
+      className="relative isolate flex min-h-[92svh] flex-col overflow-hidden md:min-h-[92vh]"
     >
-      {/* Warm glows: peach top-start, plum bottom-end, cream centre (RTL: start = right). */}
+      {/* Warm glows: peach top-start, plum bottom-end (RTL: start = right). */}
       <div
         aria-hidden
         className="absolute inset-0 -z-20"
@@ -63,65 +65,54 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
           background: [
             "radial-gradient(58% 48% at 92% 4%, rgb(253 230 219 / 0.95), transparent 72%)",
             "radial-gradient(52% 46% at 6% 98%, rgb(244 230 238 / 0.95), transparent 72%)",
-            "radial-gradient(46% 40% at 50% 52%, rgb(248 243 236 / 0.9), transparent 78%)",
             "var(--color-canvas)",
           ].join(", "),
         }}
       />
 
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-        {FLOATERS.map((f) => (
-          <div key={f.name} className={`absolute ${f.cls}`}>
-            <div
-              className="animate-float opacity-90 drop-shadow-[0_18px_22px_rgb(105_29_78/0.14)]"
-              style={{ "--r": f.r, animationDelay: f.delay } as CSSProperties}
-            >
-              <Icon3D name={f.name} size={f.size} />
-            </div>
-          </div>
-        ))}
-      </div>
-
       <div className="absolute inset-0">
         <LettersScene
           letters={sceneLetters}
           onOpen={openLetter}
-          paused={openMessage !== null}
+          paused={openMessage !== null || immersiveOpen}
           className="h-full w-full"
         />
       </div>
 
       {/* Foreground: the wrapper ignores the pointer so floating letters stay hoverable. */}
-      <div className="pointer-events-none relative z-10 flex flex-1 flex-col items-center justify-center px-4 pt-[5.5rem] pb-20 text-center sm:pt-28 sm:pb-24">
-        <div className="relative isolate flex max-w-3xl flex-col items-center">
+      <div className="pointer-events-none relative z-10 flex flex-1 flex-col items-center justify-center px-4 pt-20 pb-12 text-center sm:pt-28 sm:pb-20">
+        <div className="relative isolate flex w-full max-w-[21.5rem] flex-col items-center sm:max-w-3xl">
           <div
             aria-hidden
-            className="absolute -inset-x-16 -inset-y-14 -z-10 sm:-inset-x-24"
+            className="absolute -inset-x-10 -inset-y-12 -z-10 sm:-inset-x-24 sm:-inset-y-14"
             style={{
               background:
-                "radial-gradient(closest-side, rgb(251 247 242 / 0.94), rgb(251 247 242 / 0.72) 55%, rgb(251 247 242 / 0) 100%)",
+                "radial-gradient(closest-side, rgb(251 247 242 / 0.95), rgb(251 247 242 / 0.78) 58%, rgb(251 247 242 / 0) 100%)",
             }}
           />
 
-          <span className="eyebrow animate-fade-up bg-white/80 backdrop-blur-sm" style={fade(0)}>
+          <p
+            className="flex animate-fade-up items-center gap-2.5 text-[0.95rem] font-bold text-orange-700"
+            style={fade(0)}
+          >
+            <CancelLines />
             {COPY.badge}
-          </span>
+            <CancelLines flip />
+          </p>
 
           <h1
             id="hero-title"
-            className="mt-5 animate-fade-up text-[length:clamp(2.7rem,1.45rem+5.4vw,5.75rem)] leading-[1.18] font-bold tracking-tight text-balance text-plum"
+            className="mt-3 animate-fade-up text-[length:clamp(3.3rem,2.1rem+4.6vw,6rem)] leading-[1.12] font-bold text-plum sm:mt-4"
             style={fade(90)}
           >
-            {TITLE_START}
-            <br />
-            <span className="font-hand relative inline-block px-1 text-[1.18em] leading-[1.05] font-bold text-orange">
-              {/* Aref Ruqaa lifts the shadda far above the word at display sizes; drop it here. */}
-              {TITLE_LAST.replace(/\u0651/g, "")}
+            <span className="block sm:inline">{TITLE_START}</span>{" "}
+            <span className="relative inline-block text-[1.12em] text-orange">
+              {TITLE_LAST}
               <svg
                 aria-hidden
                 viewBox="0 0 200 18"
                 preserveAspectRatio="none"
-                className="absolute inset-x-0 -bottom-1 h-3 w-full text-orange-300"
+                className="absolute inset-x-[-4%] -bottom-1.5 h-3.5 w-[108%] text-orange-300"
               >
                 <path
                   d="M4 12 C 50 3, 120 3, 196 10"
@@ -131,49 +122,41 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
                   strokeLinecap="round"
                 />
               </svg>
-            </span>{" "}
-            <span className="inline-block align-[0.08em] text-[0.82em]">{COPY.heroTitleEmoji}</span>
+            </span>
           </h1>
 
           <p
-            className="mt-5 max-w-[36rem] animate-fade-up text-base leading-7 text-balance text-ink-soft sm:mt-6 sm:text-lg sm:leading-9"
+            className="mt-6 max-w-[34rem] animate-fade-up text-[1.05rem] leading-8 text-pretty text-ink-soft sm:text-lg sm:leading-9"
             style={fade(180)}
           >
-            {COPY.heroLead.map((line) => (
-              <span key={line} className="block">
-                {line}
-              </span>
-            ))}
+            {first} <span className="sm:block">{second}</span>
           </p>
 
           <div
-            className="pointer-events-auto mt-8 flex animate-fade-up flex-wrap items-center justify-center gap-3"
+            className="pointer-events-auto mt-8 grid w-full animate-fade-up gap-3 sm:flex sm:w-auto sm:justify-center"
             style={fade(270)}
           >
-            <a href="#write" className="btn btn-primary min-w-[9.5rem] text-[1.05rem]">
+            <a href="#write" className="btn btn-primary text-[1.05rem] sm:min-w-[11rem]">
               {COPY.heroCtaWrite}
             </a>
-            <a href="#letters" className="btn btn-ghost min-w-[9.5rem] text-[1.05rem]">
-              {COPY.heroCtaSearch}
-            </a>
+            <button
+              ref={exploreRef}
+              type="button"
+              onClick={openImmersive}
+              onPointerEnter={() => void loadImmersive()}
+              onFocus={() => void loadImmersive()}
+              aria-haspopup="dialog"
+              className="btn btn-ghost text-[1.05rem]"
+            >
+              <FoldedLetterIcon className="size-5 shrink-0" />
+              {COPY.heroCtaExplore}
+            </button>
           </div>
 
-          <p
-            className="mt-6 inline-flex animate-fade-up items-center gap-2 rounded-full border border-plum-100 bg-white/75 px-4 py-1.5 text-sm font-semibold text-plum shadow-soft backdrop-blur-sm sm:text-[0.95rem]"
-            style={fade(360)}
-          >
-            <span aria-hidden>💌</span>
-            {total > 0 ? (
-              <span>
-                <b className="font-bold tabular-nums">{formatCount(total)}</b> رسالة شكر وصلت لمعلمينهم
-              </span>
-            ) : (
-              <span>{COPY.emptyWall}</span>
-            )}
-          </p>
+          <CounterNote total={total} style={fade(360)} />
 
           <p
-            className="mt-4 hidden max-w-sm animate-fade-up text-[0.85rem] leading-6 text-ink-mute md:pointer-fine:block"
+            className="mt-3 hidden max-w-sm animate-fade-up text-[0.9rem] leading-6 text-ink-soft md:pointer-fine:block"
             style={fade(450)}
           >
             {COPY.sceneHint}
@@ -181,25 +164,94 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
         </div>
       </div>
 
-      <a
-        href="#write"
-        aria-label="انزل لكتابة رسالتك"
-        className="absolute inset-x-0 bottom-4 z-10 mx-auto grid size-11 animate-fade-up place-items-center rounded-full border border-plum-100 bg-white/70 text-plum shadow-soft backdrop-blur-sm transition-colors hover:bg-white sm:bottom-6"
-        style={fade(600)}
-      >
-        <svg
-          aria-hidden
-          viewBox="0 0 24 24"
-          className="size-5 animate-bounce"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </a>
+      {immersiveMounted && (
+        // The scene components play the "open" sound inside their own click handlers.
+        <ImmersiveLetters
+          open={immersiveOpen}
+          onClose={closeImmersive}
+          onOpen={openLetter}
+          seed={visible}
+          paused={openMessage !== null}
+          onMessages={remember}
+        />
+      )}
     </section>
+  );
+}
+
+/** The live count, written like a note in the margin, with a link down to the search. */
+function CounterNote({ total, style }: { total: number; style: CSSProperties }) {
+  return (
+    <div className="mt-7 flex animate-fade-up items-start gap-2 text-start" style={style}>
+      <svg
+        aria-hidden
+        viewBox="0 0 48 40"
+        className="mt-1 h-8 w-10 shrink-0 text-orange"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {/* A pen-drawn arrow curling up towards the buttons. */}
+        <path d="M6 34c10 1 20-3 26-11 4-6 5-12 4-18" />
+        <path d="M30 9l6-5 4 7" />
+      </svg>
+      <p className="-rotate-2 leading-7 text-plum">
+        {total > 0 ? (
+          <>
+            <span className="font-bold">{COPY.heroCount(total, formatCount(total))}</span>
+            <br />
+            <span className="text-ink-soft">{COPY.heroSearchNote} </span>
+            <a
+              href="#letters"
+              className="pointer-events-auto inline-flex min-h-11 items-center font-bold text-orange-700 underline decoration-orange-300 decoration-2 underline-offset-[6px] hover:decoration-orange-700"
+            >
+              {COPY.heroCtaSearch}
+            </a>
+          </>
+        ) : (
+          <span className="font-bold">{COPY.emptyWall}</span>
+        )}
+      </p>
+    </div>
+  );
+}
+
+/** Postmark cancellation waves around the date line. */
+function CancelLines({ flip = false }: { flip?: boolean }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 36 14"
+      className={`h-3.5 w-9 text-orange-300 ${flip ? "-scale-x-100" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    >
+      <path d="M1 3.5c4-2.5 7 2.5 11 0s7 2.5 11 0 7 2.5 12 0" />
+      <path d="M1 10.5c4-2.5 7 2.5 11 0s7 2.5 11 0 7 2.5 12 0" />
+    </svg>
+  );
+}
+
+/** A triangle-folded letter, like the ones flying in the scene. */
+function FoldedLetterIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    >
+      <path d="M3 6.5h18L12 20z" />
+      <path d="M3 6.5l9 6.5 9-6.5" />
+      <circle cx="12" cy="11.2" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
   );
 }

@@ -1,0 +1,272 @@
+/* The form as a letter being written: a sheet lifted out of an envelope in the
+   writer's colour, words written straight on the paper, and the fold-and-fly
+   send animation. Logical properties only (the page is RTL). */
+
+/* ------------------------------------------------------------- stage --- */
+/* The sheet stands in an open envelope: the envelope's pocket (in the
+   writer's colour, --env / --env-in) sits in front of the sheet's blank foot. */
+.stage {
+  --pocket: 6.5rem;
+  --tuck: 4rem; /* how much of the sheet is inside the pocket */
+  position: relative;
+  isolation: isolate;
+  padding-bottom: calc(var(--pocket) - var(--tuck));
+}
+@media (min-width: 640px) {
+  .stage {
+    --pocket: 8rem;
+    --tuck: 4.75rem;
+  }
+}
+
+.pocket {
+  position: absolute;
+  inset-inline: -0.5rem;
+  bottom: 0;
+  z-index: 1;
+  height: var(--pocket);
+  pointer-events: none;
+  border-radius: 0.2rem 0.2rem 0.45rem 0.45rem;
+  background-color: var(--env);
+  background-image: var(--paper-grain);
+  box-shadow:
+    inset 0 1.5px 0 rgb(255 255 255 / 0.35),
+    0 -1px 0 rgb(42 20 34 / 0.08),
+    0 18px 30px -18px rgb(42 20 34 / 0.45);
+  transition: background-color 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pocket svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--env-in);
+  transition: color 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (min-width: 640px) {
+  .pocket {
+    inset-inline: -0.9rem;
+  }
+}
+
+/* ------------------------------------------------------------- sheet --- */
+.sheet {
+  position: relative;
+  padding: 1.35rem 1.125rem calc(var(--tuck) + 1.25rem);
+  background-color: var(--color-sheet);
+  background-image: var(--paper-grain);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-sheet);
+}
+@media (min-width: 640px) {
+  .sheet {
+    padding: 2rem 2.75rem calc(var(--tuck) + 1.75rem);
+  }
+}
+
+/* A word written on the paper («إلى», «في», «من:») that labels the blank after it. */
+.word {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 2.75rem;
+  color: var(--color-plum);
+}
+
+/* A blank on the paper: just an underline, ≥ 44px tall, ≥ 16px text. */
+.blank {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.3rem 0.2rem 0.15rem;
+  border: 0;
+  border-bottom: 1.5px dashed rgb(105 29 78 / 0.32);
+  border-radius: 0;
+  background: transparent;
+  font-size: 1.125rem;
+  color: var(--color-ink);
+  transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+}
+.blank::placeholder {
+  color: var(--color-ink-mute);
+  opacity: 1;
+}
+.blank:hover {
+  border-bottom-color: rgb(105 29 78 / 0.5);
+}
+.blank:focus {
+  outline: none;
+  border-bottom: 1.5px solid var(--color-plum);
+  box-shadow: 0 1.5px 0 var(--color-plum);
+  background-color: rgb(105 29 78 / 0.04);
+}
+.blank[aria-invalid="true"] {
+  border-bottom: 1.5px solid var(--color-danger);
+  box-shadow: 0 1.5px 0 var(--color-danger);
+}
+
+/* The addressee: bigger and bolder, like an address. */
+.name {
+  font-weight: 700;
+  font-size: 1.3rem;
+}
+
+/* The signature is handwritten. */
+.signature {
+  font-family: var(--font-hand);
+  font-weight: 700;
+  font-size: 1.4rem;
+}
+.signature::placeholder {
+  font-weight: 400;
+}
+.name::placeholder {
+  font-weight: 500;
+}
+
+/* «[اللقب ▾]»: a native select dressed as a blank, chevron at the end (left). */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-inline-end: 1.4rem;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--color-plum);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5 6 6l4.5-4.5' fill='none' stroke='%23691d4e' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: 0.7rem;
+  background-position: left 0.25rem center;
+}
+.select[data-empty="true"] {
+  color: var(--color-ink-mute);
+  font-weight: 500;
+}
+.select option {
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+/* Message: ruled lines drawn exactly on the text's line-height. */
+.ruled {
+  --lh: 2.125rem;
+  display: block;
+  width: 100%;
+  min-height: calc(var(--lh) * 6 + 0.25rem);
+  padding: 0 0.2rem;
+  border: 0;
+  resize: none;
+  overflow: hidden;
+  font-size: 1.125rem;
+  line-height: var(--lh);
+  color: var(--color-ink);
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--lh) - 1px),
+    rgb(105 29 78 / 0.13) calc(var(--lh) - 1px),
+    rgb(105 29 78 / 0.13) var(--lh)
+  );
+  background-attachment: local;
+  border-radius: 0.25rem;
+  transition: box-shadow 0.2s, background-color 0.2s;
+}
+.ruled::placeholder {
+  color: var(--color-ink-mute);
+  opacity: 1;
+}
+.ruled:focus {
+  outline: none;
+  background-color: rgb(105 29 78 / 0.025);
+  box-shadow: 0 0 0 2px rgb(105 29 78 / 0.28);
+}
+.ruled[aria-invalid="true"] {
+  box-shadow: 0 0 0 2px rgb(194 54 31 / 0.5);
+}
+
+/* ---------------------------------------------------- envelope colour --- */
+.swatch {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.6rem;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.swatch svg {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s;
+  filter: drop-shadow(0 1px 1px rgb(42 20 34 / 0.14));
+}
+.swatch:hover:not(:disabled) svg {
+  transform: translateY(-2px) rotate(-3deg);
+}
+.swatch[aria-checked="true"] svg {
+  transform: translateY(-3px) rotate(-4deg) scale(1.08);
+  filter: drop-shadow(0 6px 6px rgb(42 20 34 / 0.24));
+}
+.swatch:disabled {
+  cursor: not-allowed;
+}
+
+/* --------------------------------------------------------- sending --- */
+/* Fold (thirds → triangle), tilt, fly up and away. */
+.fold {
+  z-index: 30;
+  pointer-events: none;
+  transform-origin: 50% 30%;
+  will-change: transform, clip-path, opacity;
+  animation: fold-fly 0.95s cubic-bezier(0.55, 0, 0.3, 1) forwards;
+}
+.fold > * {
+  animation: ink-away 0.28s ease-out forwards;
+}
+
+@keyframes fold-fly {
+  0% {
+    transform: none;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    opacity: 1;
+  }
+  26% {
+    transform: scale(0.72, 0.4);
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.5, 0.3) rotate(-5deg);
+    clip-path: polygon(0 0, 100% 0, 50% 100%, 50% 100%);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-22vw, -110vh) scale(0.16, 0.1) rotate(-26deg);
+    clip-path: polygon(0 0, 100% 0, 50% 100%, 50% 100%);
+    opacity: 0;
+  }
+}
+
+@keyframes ink-away {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Everything around the sheet steps aside while it folds. */
+.away {
+  pointer-events: none;
+  animation: fade-away 0.3s ease forwards;
+}
+.awayLate {
+  pointer-events: none;
+  animation: fade-away 0.35s ease 0.45s forwards;
+}
+
+/* Reduced motion: a plain crossfade instead of the flight. */
+.fade {
+  pointer-events: none;
+  animation: fade-away 0.25s ease forwards;
+}
+@keyframes fade-away {
+  to {
+    opacity: 0;
+  }
+}

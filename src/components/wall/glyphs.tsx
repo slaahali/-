@@ -92,6 +92,63 @@ export function FlagGlyph({
   );
 }
 
+/** «⋯» — the quiet "more" trigger on cards (opens the report sheet). */
+export function MoreGlyph({ className, size = 20 }: GlyphProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="5.5" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="18.5" cy="12" r="1.7" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function CheckGlyph({ className, size = 20 }: GlyphProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path
+        d="m5 12.5 4.5 4.5L19 7.5"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function LockGlyph({ className, size = 16 }: GlyphProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <rect x="5" y="10.5" width="14" height="10" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+/** A dove with an olive sprig, for «في ذكرى» letters (drawn on a 64 grid). */
+export function DoveGlyph({ className, size = 40 }: GlyphProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false" className={className}>
+      <path
+        d="M9 35c6-1 11-5 15-11 3-4 7-7 12-7 4 0 7 2 9 5l7-1-5 5c0 11-9 19-21 19-6 0-11-2-15-5l-9 1Z"
+        fill="currentColor"
+      />
+      <path
+        d="M27 27c3 7 9 11 18 11"
+        fill="none"
+        stroke="rgb(0 0 0 / 0.18)"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+      <circle cx="41" cy="22" r="1.6" fill="rgb(0 0 0 / 0.45)" />
+      <path d="M52 21c3 1 5 3 6 6" fill="none" stroke="#8a9a5b" strokeWidth="2" strokeLinecap="round" />
+      <ellipse cx="57.5" cy="23" rx="2.6" ry="1.4" fill="#8a9a5b" transform="rotate(35 57.5 23)" />
+      <ellipse cx="55" cy="27.5" rx="2.6" ry="1.4" fill="#8a9a5b" transform="rotate(-30 55 27.5)" />
+    </svg>
+  );
+}
+
 export function Spinner({ className = "", size = 18 }: GlyphProps) {
   return (
     <svg {...base(size)} className={`animate-spin ${className}`}>

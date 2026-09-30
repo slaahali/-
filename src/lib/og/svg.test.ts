@@ -1,20 +1,64 @@
 import { describe, expect, it } from "vitest";
-import { buildOgSvg, escapeXml, fitLine, stripEmoji, textWidth, wrapText, type OgLetterScene } from "./svg";
+import {
+  buildOgSvg,
+  escapeXml,
+  fitLine,
+  pickSans,
+  stripEmoji,
+  textWidth,
+  wrapText,
+  type OgBrand,
+  type OgLetterScene,
+  type OgSearchScene,
+} from "./svg";
+
+const brand: OgBrand = {
+  logo: "data:image/png;base64,iVBORw0KGgo=",
+  logoRatio: 497 / 120,
+  wordmark: "ذا شفز",
+  host: "example.com",
+  postmarkTop: "يوم المعلم",
+  postmarkBottom: "٥ أكتوبر",
+};
 
 const letter = (over: Partial<OgLetterScene> = {}): OgLetterScene => ({
   kind: "letter",
-  label: "رسالة شكر",
-  to: "إلى: أستاذة نورة",
+  toLabel: "إلى",
+  toName: "أستاذة نورة",
   school: "ثانوية الملك فهد",
   body: "شكراً لأنك آمنت فيني",
   signature: "— سارة",
+  date: "5 أكتوبر 2026",
   stamp: "شكراً معلمي",
   memory: false,
-  palette: { accent: "#eb652c", bg: "#fde3d6", ink: "#4f1f0c", gradient: ["#f7a64f", "#eb652c"] },
-  brandLine: "ذا شفز · يوم المعلم",
-  host: "example.com",
+  palette: { key: "orange", accent: "#eb652c", bg: "#fde3d6", ink: "#4f1f0c", gradient: ["#f7a64f", "#eb652c"], icon: "books" },
+  seed: "abc",
+  brand,
   ...over,
 });
+
+const search = (over: Partial<OgSearchScene> = {}): OgSearchScene => ({
+  kind: "search",
+  total: 0,
+  countNumber: "0",
+  countLabel: "رسالة شكر",
+  toLabel: "إلى",
+  query: "سرّي",
+  tagline: "اكتشف وش كتبوا",
+  emptyTitle: "ما أحد كتب لك للحين؟",
+  emptyLead: "ابدأ أنت واكتب لأحد علّمك",
+  emptyCta: "اكتب رسالتك",
+  brand,
+  ...over,
+});
+
+/** font-family of the <text> element holding `s` (inside RLE…PDF). */
+function familyOf(svg: string, s: string): string | undefined {
+  const i = svg.indexOf(`‫${s}‬`);
+  if (i < 0) return undefined;
+  const open = svg.lastIndexOf("<text", i);
+  return /font-family="([^"]+)"/.exec(svg.slice(open, i))?.[1];
+}
 
 describe("stripEmoji", () => {
   it("removes emoji, ZWJ sequences, flags, keycaps and variation selectors", () => {
@@ -53,39 +97,63 @@ describe("wrapText / fitLine", () => {
     for (const l of lines) expect(textWidth(l, 30, "sans")).toBeLessThanOrEqual(300);
   });
   it("shrinks, then truncates", () => {
-    expect(fitLine("إلى: أستاذ علي", 700, 56, 34, "sansBold").size).toBe(56);
-    const long = fitLine("إلى: " + "عبدالرحمن ".repeat(8), 500, 56, 34, "sansBold");
+    expect(fitLine("أستاذ علي", 700, 56, 34, "sansBold").size).toBe(56);
+    const long = fitLine("عبدالرحمن ".repeat(8).trim(), 500, 56, 34, "sansBold");
     expect(long.size).toBe(34);
     expect(long.text.endsWith("…")).toBe(true);
   });
 });
 
+describe("font choice (resvg falls back per <text>, not per glyph)", () => {
+  it("uses Molhim for Arabic, Plex once Latin letters appear", () => {
+    expect(pickSans(["شكراً يا أستاذة نورة ٥ أكتوبر 2026"])).toBe("molhim");
+    expect(pickSans(["شكراً Ms. Sarah"])).toBe("plex");
+    // «» … — have Molhim-safe stand-ins, so they don't force a fallback.
+    expect(pickSans(["إلى «نورة» — شكراً…"])).toBe("molhim");
+  });
+  it("keeps one family for a whole block", () => {
+    expect(pickSans(["سطر عربي", "and one Latin line"])).toBe("plex");
+  });
+  it("draws Arabic runs in Molhim and Latin runs in Plex", () => {
+    const svg = buildOgSvg(letter({ school: "British International School" }));
+    expect(familyOf(svg, "أستاذة نورة")).toBe("Molhim");
+    expect(familyOf(svg, "British International School")).toBe("IBM Plex Sans Arabic");
+    expect(familyOf(svg, "— سارة")).toBe("Aref Ruqaa");
+  });
+  it("swaps «» for quotes Molhim has instead of falling back", () => {
+    const svg = buildOgSvg(letter({ body: "عبارتك «اللي يتعب»" }));
+    expect(svg).toContain("‫عبارتك &quot;اللي يتعب&quot;‬");
+    expect(familyOf(svg, "عبارتك &quot;اللي يتعب&quot;")).toBe("Molhim");
+  });
+});
+
 describe("buildOgSvg", () => {
   it("escapes user text", () => {
-    const svg = buildOgSvg(letter({ body: `<script>alert("x")</script> & شكراً`, to: "إلى: <b>" }));
+    const svg = buildOgSvg(letter({ body: `<script>alert("x")</script> & شكراً`, toName: "<b>" }));
     expect(svg).not.toContain("<script>");
     expect(svg).not.toContain("<b>");
-    expect(svg).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp;");
+    expect(svg).toContain("&lt;script&gt;");
+    expect(svg).toContain("&quot;x&quot;");
+    expect(svg).toContain("&amp;");
   });
   it("wraps Arabic lines in RLE…PDF for correct bidi in resvg", () => {
-    const svg = buildOgSvg(letter());
-    expect(svg).toContain("‫إلى: أستاذة نورة‬");
+    expect(buildOgSvg(letter())).toContain("‫أستاذة نورة‬");
+  });
+  it("embeds the official logo, or falls back to the wordmark", () => {
+    expect(buildOgSvg(letter())).toContain('<image href="data:image/png;base64,iVBORw0KGgo="');
+    const plain = buildOgSvg(letter({ brand: { ...brand, logo: null } }));
+    expect(plain).not.toContain("<image");
+    expect(plain).toContain("‫ذا شفز‬");
+  });
+  it("uses the dove seal for memory letters", () => {
+    const heart = buildOgSvg(letter());
+    const dove = buildOgSvg(letter({ memory: true }));
+    expect(heart).not.toBe(dove);
+    expect(dove).toContain("M3 14.5c2.6.2");
   });
   it("only draws the query when the search matched letters", () => {
-    const base = {
-      kind: "search" as const,
-      countNumber: "0",
-      countLabel: "رسالة شكر",
-      toQuery: "إلى «سرّي»",
-      tagline: "اكتشف وش كتبوا",
-      emptyTitle: "ما أحد كتب لك للحين؟",
-      emptyLead: "ابدأ أنت واكتب لأحد علّمك",
-      emptyCta: "اكتب رسالتك",
-      brandLine: "ذا شفز",
-      host: "example.com",
-    };
-    expect(buildOgSvg({ ...base, total: 0 })).not.toContain("سرّي");
-    expect(buildOgSvg({ ...base, total: 0 })).toContain("ما أحد كتب لك للحين؟");
-    expect(buildOgSvg({ ...base, total: 3, countNumber: "3" })).toContain("إلى «سرّي»");
+    expect(buildOgSvg(search())).not.toContain("سرّي");
+    expect(buildOgSvg(search())).toContain("ما أحد كتب لك للحين؟");
+    expect(buildOgSvg(search({ total: 3, countNumber: "3" }))).toContain("‫سرّي‬");
   });
 });

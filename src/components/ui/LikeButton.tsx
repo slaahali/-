@@ -6,6 +6,7 @@ import { prefersReducedMotion } from "@/components/wall/hooks";
 import { cardStyle } from "@/lib/assets";
 import { COPY } from "@/lib/config";
 import { formatCount } from "@/lib/format";
+import { play } from "@/lib/sound";
 import type { PublicMessage } from "@/lib/types";
 
 const HEART =
@@ -14,7 +15,8 @@ const BURST_COLORS = ["#eb652c", "#f7a64f", "#a73784", "#eb652c", "#f7a64f", "#a
 
 /**
  * ❤ like (🤍 "دعوة بالرحمة" for in-memory letters). Optimistic via useLetters();
- * the pop/burst runs on click only and is skipped for reduced motion.
+ * the pop/burst + sound run on click only (burst skipped for reduced motion).
+ * "sm" is the quiet card version (heart + count), "md" the labelled one.
  */
 export function LikeButton({
   message,
@@ -76,25 +78,35 @@ export function LikeButton({
     });
   }
 
-  const sizeCls =
-    size === "sm" ? "min-h-11 gap-1.5 px-3.5 text-[0.9rem]" : "min-h-12 gap-2 px-5 text-base";
-
-  let toneCls: string;
+  const quiet = size === "sm";
+  let cls: string;
   let style: CSSProperties | undefined;
-  if (memory) {
-    toneCls = liked ? "bg-white font-bold" : "bg-white/60 hover:bg-white";
+  if (quiet) {
+    // On a card: just the heart and the count, in the card's ink.
+    cls = `min-h-11 min-w-11 justify-center gap-1.5 px-2.5 text-[0.95rem] hover:bg-white/55 ${
+      liked ? "font-bold" : "font-semibold"
+    }`;
+    style = { color: ink };
+  } else if (memory) {
+    cls = `min-h-12 gap-2 border-[1.5px] px-5 text-base ${
+      liked ? "bg-white font-bold" : "bg-white/60 font-semibold hover:bg-white"
+    }`;
     style = {
       color: ink,
       borderColor: `color-mix(in srgb, ${accent} ${liked ? 55 : 28}%, transparent)`,
     };
   } else {
-    toneCls = liked
-      ? "border-orange/40 bg-orange-50 font-bold text-orange-700"
-      : "border-plum/20 bg-white/65 text-plum hover:border-plum/45 hover:bg-white";
+    cls = `min-h-12 gap-2 border-[1.5px] px-5 text-base ${
+      liked
+        ? "border-orange/40 bg-orange-50 font-bold text-orange-700"
+        : "border-plum/20 bg-white/65 font-semibold text-plum hover:border-plum/45 hover:bg-white"
+    }`;
   }
 
   const heartFill = memory ? (liked ? "#fff" : "none") : liked ? "#eb652c" : "none";
   const heartStroke = memory ? accent : liked ? "#eb652c" : "currentColor";
+  // On cards the label is only for screen readers, except the memory wording.
+  const hideLabel = quiet && !memory;
 
   return (
     <button
@@ -102,10 +114,11 @@ export function LikeButton({
       aria-pressed={liked}
       onClick={() => {
         animate(!liked);
+        if (!liked) void play(memory ? "chime" : "like");
         void toggleLike(message);
       }}
       style={style}
-      className={`inline-flex shrink-0 items-center rounded-full border-[1.5px] font-semibold leading-none transition-[background-color,border-color,color] duration-200 ${sizeCls} ${toneCls}`}
+      className={`inline-flex shrink-0 items-center rounded-full leading-none transition-[background-color,border-color,color] duration-200 ${cls}`}
     >
       <span className="relative inline-grid place-items-center">
         <svg
@@ -137,7 +150,9 @@ export function LikeButton({
           </span>
         )}
       </span>
-      <span>{memory ? COPY.memoryLike : COPY.like}</span>
+      <span className={hideLabel ? "visually-hidden" : quiet ? "text-[0.85rem]" : undefined}>
+        {memory ? COPY.memoryLike : COPY.like}
+      </span>
       {count > 0 && <span className="tabular-nums opacity-80">{formatCount(count)}</span>}
     </button>
   );

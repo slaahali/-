@@ -9,7 +9,14 @@ import {
   type FormEvent,
 } from "react";
 import { useLetters } from "@/components/LettersProvider";
-import { CloseGlyph, FlagGlyph, Spinner } from "@/components/wall/glyphs";
+import {
+  CheckGlyph,
+  CloseGlyph,
+  FlagGlyph,
+  LockGlyph,
+  MoreGlyph,
+  Spinner,
+} from "@/components/wall/glyphs";
 import { prefersReducedMotion } from "@/components/wall/hooks";
 import { reportMessage } from "@/lib/api-client";
 import { COPY } from "@/lib/config";
@@ -23,6 +30,7 @@ export { LETTER_HIDDEN_EVENT } from "@/lib/events";
 const REASONS: ReportReason[] = ["inappropriate", "removal_request", "other"];
 const NOTE_MAX = 200;
 const REMOVAL_HINT = "لو أنت الشخص المذكور بنخفيها فوراً ونراجع طلبك";
+const REPORTED = "تم الإبلاغ";
 
 // ---- ids this browser already reported (localStorage, shared by every button) ----
 const REPORTED_KEY = "tcz_reported_v1";
@@ -68,7 +76,10 @@ function useWasReported(id: string): boolean {
   );
 }
 
-/** «إبلاغ / طلب حذف» → a small sheet with the reasons (native modal <dialog>, so it sits above cards and the letter view). */
+/**
+ * «إبلاغ / طلب حذف» → a small sheet with the reasons (native modal <dialog>, so
+ * it sits above cards and the letter view). `compact` is the card's quiet «⋯».
+ */
 export function ReportButton({
   message,
   compact = false,
@@ -89,16 +100,22 @@ export function ReportButton({
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={compact ? COPY.report : undefined}
+        aria-label={compact ? (wasReported ? `${COPY.report} (${REPORTED})` : COPY.report) : undefined}
         title={compact ? COPY.report : undefined}
         className={
           compact
-            ? `grid size-11 shrink-0 place-items-center rounded-full opacity-60 transition-[opacity,background-color] duration-200 hover:bg-white/70 hover:opacity-100 ${className}`
+            ? `grid size-11 shrink-0 place-items-center rounded-full opacity-65 transition-[opacity,background-color] duration-200 hover:bg-white/60 hover:opacity-100 ${className}`
             : `inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors duration-200 hover:bg-white/70 hover:text-plum ${className}`
         }
       >
-        <FlagGlyph size={compact ? 18 : 17} filled={wasReported} />
-        {!compact && <span>{COPY.report}</span>}
+        {compact ? (
+          <MoreGlyph size={20} />
+        ) : (
+          <>
+            <FlagGlyph size={17} filled={wasReported} />
+            <span>{COPY.report}</span>
+          </>
+        )}
       </button>
       {open && <ReportDialog message={message} onClosed={() => setOpen(false)} />}
     </>
@@ -192,7 +209,7 @@ function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed:
             <h2 id={titleId} className="text-lg font-bold text-plum">
               {COPY.report}
             </h2>
-            <p className="text-sm text-ink-soft">نبي الجدار يبقى مكان آمن ولطيف للكل 💜</p>
+            <p className="text-sm text-ink-soft">نبي الجدار يبقى مكان آمن ولطيف للكل</p>
           </div>
           <button
             type="button"
@@ -208,9 +225,9 @@ function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed:
           <div className="py-5 text-center">
             <div
               aria-hidden="true"
-              className="mx-auto grid size-16 place-items-center rounded-full bg-plum-50 text-3xl"
+              className="mx-auto grid size-14 place-items-center rounded-full bg-plum-50 text-plum"
             >
-              {hidden ? "🤍" : "🙏"}
+              <CheckGlyph size={26} />
             </div>
             <p role="status" className="mt-4 text-lg font-bold text-plum">
               {hidden ? COPY.removalDone : COPY.reportDone}
@@ -252,7 +269,7 @@ function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed:
 
             {reason === "removal_request" && (
               <p className="flex gap-2 rounded-2xl bg-orange-50 px-4 py-3 text-sm font-medium text-orange-700">
-                <span aria-hidden="true">🔒</span>
+                <LockGlyph size={16} className="mt-[0.2em] shrink-0" />
                 {REMOVAL_HINT}
               </p>
             )}

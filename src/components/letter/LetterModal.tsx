@@ -8,22 +8,25 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
 } from "react";
 import { useLetters } from "@/components/LettersProvider";
 import { ShareMenu } from "@/components/share/ShareMenu";
-import { Icon3D } from "@/components/ui/Icon3D";
 import { LikeButton } from "@/components/ui/LikeButton";
 import { ReportButton } from "@/components/ui/ReportButton";
-import { ArrowGlyph, CloseGlyph, SchoolGlyph } from "@/components/wall/glyphs";
+import { SoundToggle } from "@/components/ui/SoundToggle";
 import { useHydrated, useReducedMotion } from "@/components/wall/hooks";
-import { isFemaleTitle } from "@/components/wall/wall-utils";
-import { cardStyle, type CardStyle } from "@/lib/assets";
-import { COPY, GIFT_URL, HASHTAG } from "@/lib/config";
-import { displayTo, fromName, stampFor, toLine } from "@/lib/format";
+import { cardStyle } from "@/lib/assets";
+import { GIFT_URL } from "@/lib/config";
+import { LETTER_HIDDEN_EVENT } from "@/lib/events";
+import { displayTo, fromName, stampFor } from "@/lib/format";
+import { play } from "@/lib/sound";
 import { track } from "@/lib/track";
 import type { PublicMessage } from "@/lib/types";
+import { ArrowGlyph, CloseGlyph, GiftGlyph } from "./glyphs";
+import { classifySwipe, hasLongRun, letterPalette, noteGesture, recentGesture } from "./letter-utils";
+import { PostageStamp } from "./PostageStamp";
+import { WaxSeal } from "./WaxSeal";
 import styles from "./letter.module.css";
 
 const dateFmt = new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", {
@@ -38,17 +41,10 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? "" : dateFmt.format(d);
 }
 
-/** Light illustration gradients (cream, gold) get dark text instead of white. */
-function isLightGradient([a, b]: [string, string]): boolean {
-  const lum = (hex: string) => {
-    const n = parseInt(hex.replace("#", ""), 16);
-    const ch = (v: number) => {
-      const c = v / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
-  };
-  return (lum(a) + lum(b)) / 2 > 0.4;
+const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+function postmarkYear(iso: string): string {
+  const y = new Date(iso).getUTCFullYear();
+  return Number.isFinite(y) ? String(y).replace(/\d/g, (d) => ARABIC_DIGITS[Number(d)]) : "";
 }
 
 const FOCUSABLE =
@@ -57,6 +53,20 @@ const FOCUSABLE =
 /** The opened-letter view. Renders nothing while no letter is open. */
 export function LetterModal() {
   const { openMessage } = useLetters();
+
+  // Remember the last click / tap / key press, so an open can tell a visitor's
+  // gesture (→ paper sound) from a deep link or the back button (→ silence).
+  useEffect(() => {
+    const note = () => noteGesture();
+    const opts = { capture: true, passive: true } as const;
+    window.addEventListener("pointerdown", note, opts);
+    window.addEventListener("keydown", note, opts);
+    return () => {
+      window.removeEventListener("pointerdown", note, opts);
+      window.removeEventListener("keydown", note, opts);
+    };
+  }, []);
+
   if (!openMessage) return null;
   return <LetterView m={openMessage} />;
 }
@@ -85,19 +95,57 @@ function focusablesIn(root: HTMLElement): HTMLElement[] {
   );
 }
 
+/** Where the opener sat in its list, so focus can land on its neighbour if it disappears. */
+type Slot = { list: Element; index: number };
+
+function slotOf(el: HTMLElement): Slot | null {
+  const item = el.closest("li");
+  const list = item?.parentElement;
+  return item && list ? { list, index: Array.prototype.indexOf.call(list.children, item) } : null;
+}
+
+function restoreFocus(opener: HTMLElement | null, slot: Slot | null, openerRemoved: boolean) {
+  const opts = { preventScroll: true };
+  if (opener?.isConnected && !openerRemoved) {
+    opener.focus(opts);
+    return;
+  }
+  // The card that opened the letter left the wall (removal request): continue
+  // from the card that takes its place, or from the wall itself.
+  if (slot?.list.isConnected) {
+    const items = Array.from(slot.list.children).filter((c) => !opener || !c.contains(opener));
+    const target = items[slot.index] ?? items[slot.index - 1];
+    const focusable = target?.querySelector<HTMLElement>(FOCUSABLE);
+    if (focusable) {
+      focusable.focus(opts);
+      return;
+    }
+  }
+  const wall = document.getElementById("letters");
+  const heading = wall?.querySelector<HTMLElement>("h2") ?? wall;
+  if (!heading) return;
+  if (!heading.matches(FOCUSABLE)) heading.tabIndex = -1;
+  heading.focus(opts);
+}
+
 function LetterView({ m }: { m: PublicMessage }) {
   const { closeLetter, neighbours, openLetter } = useLetters();
   const overlayRef = useRef<HTMLDivElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const touchRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const touchRef = useRef<{ x: number; y: number; t: number; canClose: boolean } | null>(null);
+  const removedRef = useRef(new Set<string>());
+  const playedRef = useRef<string | null>(null);
   const titleId = useId();
   const reduced = useReducedMotion();
   const hydrated = useHydrated();
 
   const s = cardStyle(m);
+  const palette = letterPalette(s);
   const memory = m.inMemory;
   const calm = memory || reduced;
-  const female = isFemaleTitle(m.title);
+  const female = m.title === "ustadha" || m.title === "dr_f";
+  const signer = fromName(m);
 
   // A letter server-rendered from /m/:id is already on screen: don't replay the
   // entry after hydration. Client opens and prev/next steps do animate.
@@ -108,12 +156,32 @@ function LetterView({ m }: { m: PublicMessage }) {
   const pick = (full: string, calmCls: string) =>
     entry === "full" ? full : entry === "calm" ? calmCls : "";
 
+  // The paper sound belongs to the visitor's click; deep links stay silent.
+  // Layout effect: for a click-open this still runs inside the click's task.
+  useLayoutEffect(() => {
+    if (entry === "none" || playedRef.current === m.id) return;
+    playedRef.current = m.id;
+    if (recentGesture()) void play("open");
+  }, [m.id, entry]);
+
+  useEffect(() => {
+    const onHidden = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id;
+      if (id) removedRef.current.add(id);
+    };
+    window.addEventListener(LETTER_HIDDEN_EVENT, onHidden);
+    return () => window.removeEventListener(LETTER_HIDDEN_EVENT, onHidden);
+  }, []);
+
   // Open: remember the opener, lock page scroll, make the page inert, focus ✕.
   // Close (unmount): undo all of it and give focus back.
   useLayoutEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active !== document.body ? active : null;
+    const slot = opener ? slotOf(opener) : null;
+    const removed = removedRef.current;
     const html = document.documentElement;
     const prev = { overflow: html.style.overflow, gutter: html.style.scrollbarGutter };
     const hadScrollbar = window.innerWidth > html.clientWidth;
@@ -125,11 +193,9 @@ function LetterView({ m }: { m: PublicMessage }) {
       html.style.overflow = prev.overflow;
       html.style.scrollbarGutter = prev.gutter;
       for (const el of inerted) el.inert = false;
-      if (opener && opener !== document.body && opener.isConnected) {
-        opener.focus({ preventScroll: true });
-      }
+      restoreFocus(opener, slot, Boolean(slot) && removed.has(firstId));
     };
-  }, []);
+  }, [firstId]);
 
   // Stepping to another letter starts at the top.
   useEffect(() => {
@@ -197,6 +263,15 @@ function LetterView({ m }: { m: PublicMessage }) {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  // ---- touch: pull the header down to close, flick sideways for prev/next ----
+  const setPull = (dy: number) => {
+    const el = stackRef.current;
+    if (!el) return;
+    el.style.transition = dy ? "none" : "";
+    el.style.transform = dy ? `translateY(${Math.round(dy * 0.5)}px)` : "";
+    el.style.opacity = dy ? String(1 - Math.min(dy / 500, 0.3)) : "";
+  };
+
   const onTouchStart = (e: ReactTouchEvent) => {
     const target = e.target instanceof Element ? e.target : null;
     // Touches from portalled UI still bubble here through React; only swipe the letter itself.
@@ -211,7 +286,17 @@ function LetterView({ m }: { m: PublicMessage }) {
       return;
     }
     const p = e.touches[0];
-    touchRef.current = { x: p.clientX, y: p.clientY, t: Date.now() };
+    const canClose =
+      (overlayRef.current?.scrollTop ?? 0) <= 2 && Boolean(target.closest("[data-pull-close]"));
+    touchRef.current = { x: p.clientX, y: p.clientY, t: Date.now(), canClose };
+  };
+
+  const onTouchMove = (e: ReactTouchEvent) => {
+    const start = touchRef.current;
+    const p = e.touches[0];
+    if (!start?.canClose || !p || calm) return;
+    const dy = p.clientY - start.y;
+    setPull(dy > 0 && dy > Math.abs(p.clientX - start.x) ? dy : 0);
   };
 
   const onTouchEnd = (e: ReactTouchEvent) => {
@@ -219,18 +304,25 @@ function LetterView({ m }: { m: PublicMessage }) {
     touchRef.current = null;
     const p = e.changedTouches[0];
     if (!start || !p) return;
-    const dx = p.clientX - start.x;
-    const dy = p.clientY - start.y;
-    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - start.t > 800)
+    const action = classifySwipe(p.clientX - start.x, p.clientY - start.y, Date.now() - start.t, {
+      canClose: start.canClose,
+    });
+    if (action === "close") {
+      closeLetter();
       return;
-    // Swiping right pulls in what's on the left, i.e. the next letter in RTL.
-    step(dx > 0 ? neighbours.next : neighbours.prev);
+    }
+    setPull(0);
+    if (action) step(action === "next" ? neighbours.next : neighbours.prev);
   };
 
-  const paperVars = {
-    "--paper-bg": s.bg,
-    "--paper-ink": s.ink,
-    "--paper-accent": s.accent,
+  const vars = {
+    "--accent": s.accent,
+    "--accent-ink": palette.accentInk,
+    "--stamp-ink": palette.stampInk,
+    "--letter-ink": s.ink,
+    "--env": palette.envelope,
+    "--env-in": palette.envelopeInside,
+    "--stamp-field": palette.stampField,
   } as CSSProperties;
 
   return (
@@ -239,20 +331,29 @@ function LetterView({ m }: { m: PublicMessage }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className={styles.overlay}
+      className={`${styles.overlay} ${memory ? styles.memory : ""}`}
+      style={vars}
       onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
+      onTouchCancel={() => {
+        touchRef.current = null;
+        setPull(0);
+      }}
     >
       <div aria-hidden="true" className={styles.topFade} />
-      <button
-        ref={closeRef}
-        type="button"
-        onClick={closeLetter}
-        aria-label="إغلاق الرسالة"
-        className={styles.close}
-      >
-        <CloseGlyph size={22} stroke={1.6} />
-      </button>
+      <div className={styles.topBar}>
+        <SoundToggle className={styles.topBtn} />
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={closeLetter}
+          aria-label="إغلاق الرسالة"
+          className={`${styles.topBtn} ${styles.close}`}
+        >
+          <CloseGlyph size={22} />
+        </button>
+      </div>
 
       {neighbours.prev && (
         <button
@@ -276,187 +377,134 @@ function LetterView({ m }: { m: PublicMessage }) {
       )}
 
       <div className={styles.stage}>
-        {/* Keyed parts replay their entry animation when stepping between letters. */}
-        <div className={styles.layout}>
-          <div className="min-w-0">
-            <article
-              key={m.id}
-              aria-labelledby={titleId}
-              className={`${styles.paper} ${pick(styles.unfold, styles.fade)}`}
-              style={paperVars}
-            >
-              <span aria-hidden="true" className={styles.seal}>
-                {memory ? (
-                  <span className="text-[1.15rem] leading-none">🕊️</span>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 20.4s-7.4-4.5-9.2-9.1C1.5 8 3.5 4.6 6.9 4.6c2 0 3.6 1.1 5.1 3 1.5-1.9 3.1-3 5.1-3 3.4 0 5.4 3.4 4.1 6.7-1.8 4.6-9.2 9.1-9.2 9.1Z" />
-                  </svg>
-                )}
-              </span>
+        <div ref={stackRef} className={styles.stack}>
+          {/* Keyed parts replay their entry when stepping between letters. */}
+          <div
+            key={`env-${m.id}`}
+            aria-hidden="true"
+            data-pull-close
+            className={`${styles.envelope} ${pick(styles.envIn, styles.fadeIn)}`}
+          >
+            <span className={styles.envFlap} />
+            <span className={styles.envBody} />
+          </div>
 
-              <header>
-                {memory ? (
-                  <span className={styles.memoryTag}>{COPY.memoryTag}</span>
-                ) : (
-                  <p className={styles.kicker}>رسالة إلى</p>
-                )}
-                <h2 id={titleId} className={styles.name}>
-                  {memory ? toLine(m) : displayTo(m)}
+          <div key={m.id} className={styles.paperStack}>
+            <article
+              aria-labelledby={titleId}
+              className={`${styles.sheet} ${pick(styles.unfold, styles.sheetCalm)}`}
+            >
+              <header className={styles.head} data-pull-close>
+                <PostageStamp icon={s.icon} year={postmarkYear(m.createdAt)} />
+                <h2 id={titleId} className={styles.address}>
+                  <span className={styles.to}>{memory ? "إلى روح" : "إلى"}</span>{" "}
+                  <span className={styles.name}>{displayTo(m)}</span>
                 </h2>
-                {m.school && (
-                  <p className={styles.school}>
-                    <SchoolGlyph size={16} />
-                    <span>{m.school}</span>
-                  </p>
-                )}
+                {m.school && <p className={styles.school}>{m.school}</p>}
               </header>
 
-              <div className={`font-hand ${styles.body}`}>{m.body}</div>
+              <div className={styles.body}>{m.body}</div>
 
-              <footer className={styles.sign}>
-                <div className="min-w-0">
-                  <p className={`font-hand ${styles.from}`}>— {fromName(m)}</p>
+              <footer className={styles.closing}>
+                <div className={styles.sign}>
+                  <p className={`${hasLongRun(signer) ? "" : "font-hand"} ${styles.from}`}>
+                    — {signer}
+                  </p>
                   <time dateTime={m.createdAt} className={styles.date}>
-                    {(hydrated && formatDate(m.createdAt)) || "\u00a0"}
+                    {(hydrated && formatDate(m.createdAt)) || " "}
                   </time>
                 </div>
-                <span className={`stamp ${styles.stamp} ${pick(styles.stampIn, styles.stampCalm)}`}>
+                <span className={`stamp ${styles.rubber} ${pick(styles.rubberIn, styles.fadeLate)}`}>
                   {stampFor(m)}
                 </span>
               </footer>
+
+              <div className={styles.sheetEnd}>
+                <ReportButton message={m} />
+              </div>
             </article>
 
-            <div className={`${styles.actions} ${entry === "none" ? "" : styles.actionsIn}`}>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <LikeButton message={m} size="md" />
-                {!memory && (
-                  <a
-                    href={GIFT_URL}
-                    target="_blank"
-                    rel="noopener"
-                    onClick={() => track("gift_click", { from: "letter" })}
-                    className="btn btn-primary"
-                  >
-                    {female ? "أرسل لها هدية 🎁" : "أرسل له هدية 🎁"}
-                    <span className="visually-hidden"> (تفتح في صفحة جديدة)</span>
-                  </a>
-                )}
-                <ReportButton message={m} className="ms-auto" />
-              </div>
-              <div className="mt-4 rounded-[20px] border border-line bg-white/60 p-3 sm:p-4">
-                <p className="mb-2.5 text-sm font-bold text-ink-soft">
-                  {memory ? "شارك الرسالة 🤍" : female ? "وصّلها لمعلمتك 💜" : "وصّلها لمعلمك 💜"}
-                </p>
-                <ShareMenu message={m} mode="full" />
-              </div>
-            </div>
-
-            {(neighbours.prev || neighbours.next) && (
-              <nav
-                aria-label="التنقل بين الرسائل"
-                className={`${styles.mobileNav} mt-8 flex items-center justify-between gap-2`}
-              >
-                <button
-                  type="button"
-                  disabled={!neighbours.prev}
-                  onClick={() => step(neighbours.prev)}
-                  className="btn btn-ghost min-h-11 px-4 text-sm disabled:opacity-40"
-                >
-                  <ArrowGlyph dir="right" size={18} /> السابقة
-                </button>
-                <span aria-hidden="true" className="text-xs text-ink-mute">
-                  اسحب للتنقل
-                </span>
-                <button
-                  type="button"
-                  disabled={!neighbours.next}
-                  onClick={() => step(neighbours.next)}
-                  className="btn btn-ghost min-h-11 px-4 text-sm disabled:opacity-40"
-                >
-                  التالية <ArrowGlyph dir="left" size={18} />
-                </button>
-              </nav>
-            )}
-          </div>
-
-          <div className={styles.illoCol}>
-            <Illustration
-              key={m.id}
-              style={s}
-              interactive={!calm}
-              memory={memory}
-              entryClass={pick(styles.illoIn, styles.illoCalm)}
+            <WaxSeal
+              m={m}
+              color={memory ? "#a99fb3" : s.accent}
+              className={pick(styles.sealTravel, styles.fadeIn)}
             />
+            {entry === "full" && <FoldingLetter />}
           </div>
+        </div>
+
+        {(neighbours.prev || neighbours.next) && (
+          <nav aria-label="التنقل بين الرسائل" className={styles.stepper}>
+            <button
+              type="button"
+              disabled={!neighbours.prev}
+              onClick={() => step(neighbours.prev)}
+              className={styles.stepBtn}
+            >
+              <ArrowGlyph dir="right" size={18} /> السابقة
+            </button>
+            <span aria-hidden="true" className={styles.stepHint}>
+              اسحب للتنقل
+            </span>
+            <button
+              type="button"
+              disabled={!neighbours.next}
+              onClick={() => step(neighbours.next)}
+              className={styles.stepBtn}
+            >
+              التالية <ArrowGlyph dir="left" size={18} />
+            </button>
+          </nav>
+        )}
+
+        <div
+          className={`${styles.actions} ${memory ? styles.actionsPair : ""} ${entry === "none" ? "" : styles.actionsIn}`}
+          data-no-swipe
+        >
+          <LikeButton message={m} size="md" />
+          <ShareMenu message={m} mode="compact" className={styles.shareBtn} />
+          {!memory && (
+            <a
+              href={GIFT_URL}
+              target="_blank"
+              rel="noopener"
+              onClick={() => track("gift_click", { from: "letter" })}
+              className={`btn btn-primary ${styles.gift}`}
+            >
+              <GiftGlyph />
+              <span>
+                <span className={styles.giftVerb}>{female ? "أرسل لها " : "أرسل له "}</span>
+                هدية
+              </span>
+              <span className="visually-hidden"> (تفتح في صفحة جديدة)</span>
+            </a>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-/** Gradient card with the letter's 3D icon; tilts toward the pointer on desktop. */
-function Illustration({
-  style: s,
-  interactive,
-  memory,
-  entryClass,
-}: {
-  style: CardStyle;
-  interactive: boolean;
-  memory: boolean;
-  entryClass: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const el = ref.current;
-    if (!interactive || !el || e.pointerType !== "mouse") return;
-    const r = el.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    el.classList.add(styles.tilting);
-    el.style.setProperty("--rx", `${(-py * 14).toFixed(2)}deg`);
-    el.style.setProperty("--ry", `${(px * 16).toFixed(2)}deg`);
-    el.style.setProperty("--gx", `${((px + 0.5) * 100).toFixed(1)}%`);
-    el.style.setProperty("--gy", `${((py + 0.5) * 100).toFixed(1)}%`);
-  };
-
-  const onLeave = () => {
-    const el = ref.current;
-    if (!el) return;
-    el.classList.remove(styles.tilting);
-    for (const p of ["--rx", "--ry", "--gx", "--gy"]) el.style.removeProperty(p);
-  };
-
+/**
+ * The triangle-folded letter from the 3D scene, laid over the sheet: its three
+ * flaps swing open around their outer edges while the sheet underneath grows
+ * from the triangle to the full page. Removes itself when done.
+ */
+function FoldingLetter() {
+  const [done, setDone] = useState(false);
+  if (done) return null;
   return (
-    <div className={`${styles.illoWrap} ${entryClass}`}>
-      <div
-        ref={ref}
-        aria-hidden="true"
-        onPointerMove={onMove}
-        onPointerLeave={onLeave}
-        className={styles.illo}
-        style={
-          {
-            "--g1": s.gradient[0],
-            "--g2": s.gradient[1],
-            "--illo-ink": isLightGradient(s.gradient) ? s.ink : "#fff",
-          } as CSSProperties
-        }
-      >
-        <span className={styles.grain} />
-        <span className={styles.shine} />
-        <div className={styles.illoText}>
-          <span className={styles.illoBadge}>{COPY.badge}</span>
-          <span className={`font-hand ${styles.illoTag}`}>
-            {memory ? COPY.memoryStamp : HASHTAG}
-          </span>
-        </div>
-        <div className={`${styles.illoIcon} ${memory ? "" : styles.floating}`}>
-          <Icon3D name={s.icon} size={220} priority />
-        </div>
-      </div>
-    </div>
+    <span
+      aria-hidden="true"
+      className={styles.fold}
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget) setDone(true);
+      }}
+    >
+      <span className={styles.foldShadow} />
+      <span className={`${styles.flap} ${styles.flapB}`} />
+      <span className={`${styles.flap} ${styles.flapL}`} />
+      <span className={`${styles.flap} ${styles.flapR}`} />
+    </span>
   );
 }

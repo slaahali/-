@@ -12,14 +12,16 @@ import { Spinner } from "./glyphs";
 import { MessageCard, SkeletonCard } from "./MessageCard";
 import { SearchBar } from "./SearchBar";
 import { useWall } from "./useWall";
-import { cleanQueryName } from "./wall-utils";
+import { cleanQueryName, lettersCount } from "./wall-utils";
 import styles from "./wall.module.css";
 
 const RESULTS_ID = "wall-results";
 const LEAVE_MS = 450;
 const FRESH_MS = 9000;
 const TOAST_MS = 3800;
-const SENT_TOAST = "وصلت رسالتك 💜";
+
+/** «3 رسائل لـ «نورة»» with the right noun form (COPY.searchResults can't inflect). */
+const resultsLine = (n: number, q: string) => `${lettersCount(n)} لـ «${q}»`;
 
 /** «جدار الامتنان»: search, sort and the masonry of letters (section #letters). */
 export function WallSection({
@@ -46,7 +48,7 @@ export function WallSection({
       wall.prepend(m);
       setFreshId(m.id);
     } else {
-      setToast({ text: SENT_TOAST, key: Date.now() });
+      setToast({ text: m.inMemory ? "وصلت رسالتك 🤍" : "وصلت رسالتك 💜", key: Date.now() });
     }
   });
   useEffect(() => onNewMessage((m) => handleNew(m)), [onNewMessage]);
@@ -95,7 +97,7 @@ export function WallSection({
   let announce = "";
   if (loading) announce = "جاري البحث…";
   else if (searching && !listFailed)
-    announce = empty ? COPY.emptySearchTitle : COPY.searchResults(formatCount(wall.total), q);
+    announce = empty ? COPY.emptySearchTitle : resultsLine(wall.total, q);
 
   return (
     <>
@@ -105,28 +107,25 @@ export function WallSection({
         className={`${styles.section} scroll-mt-16 py-16 sm:py-24`}
       >
         <div className="container-page">
-          <header className="mx-auto max-w-3xl text-center">
-            <p className="eyebrow">
-              <span aria-hidden="true">💌</span> {formatCount(allTotal)} رسالة
-            </p>
-            <h2
-              id="wall-title"
-              className="mt-4 text-[2.1rem] leading-tight font-bold text-plum sm:text-5xl"
-            >
-              {COPY.wallTitle}
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-[1.3rem] leading-snug font-bold text-ink sm:text-[1.8rem]">
-              {COPY.wallCta}
-            </p>
-          </header>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:items-end lg:gap-12">
+            <header className="max-w-2xl">
+              {allTotal > 0 && (
+                <p className="mb-2 flex items-center gap-2.5 text-[0.95rem] font-bold text-orange-700">
+                  <span aria-hidden="true" className="h-[1.5px] w-7 bg-current opacity-60" />
+                  {lettersCount(allTotal, { one: "رسالة وحدة" })} على الجدار
+                </p>
+              )}
+              <h2
+                id="wall-title"
+                className="text-[2.35rem] leading-[1.2] font-bold text-plum sm:text-5xl"
+              >
+                {COPY.wallTitle}
+              </h2>
+              <p className="mt-2 text-[1.2rem] leading-snug font-bold text-ink sm:text-[1.55rem]">
+                {COPY.wallCta}
+              </p>
+            </header>
 
-          <div className="relative mx-auto mt-7 max-w-2xl sm:mt-9">
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute -end-3 -top-14 hidden rotate-12 drop-shadow-lg sm:block lg:-end-10"
-            >
-              <Icon3D name="search" size={76} />
-            </span>
             <SearchBar
               value={wall.query}
               onChange={wall.setQuery}
@@ -140,12 +139,12 @@ export function WallSection({
           </p>
 
           {!settledEmpty && (
-            <div className="mt-8 flex flex-col-reverse items-center gap-4 sm:mt-10 sm:flex-row sm:justify-between">
-              <div className="flex min-h-11 flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:justify-start">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line pb-1 sm:mt-8">
+              <div className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                 {searching && !empty && (
                   <>
-                    <p className="text-lg font-bold text-plum sm:text-xl">
-                      {COPY.searchResults(formatCount(wall.total), q)}
+                    <p className="text-[1.05rem] font-bold text-plum [overflow-wrap:anywhere] sm:text-lg">
+                      {resultsLine(wall.total, q)}
                     </p>
                     <ShareSearch q={q} count={wall.total} />
                   </>
@@ -167,12 +166,12 @@ export function WallSection({
             ) : (
               <ul
                 role="list"
-                className={`columns-1 gap-5 pt-3 transition-opacity duration-300 sm:columns-2 lg:columns-3 lg:gap-6 ${
+                className={`columns-1 gap-6 pt-5 transition-opacity duration-300 sm:columns-2 lg:columns-3 lg:gap-7 ${
                   loading ? "opacity-45 delay-150" : ""
                 }`}
               >
                 {wall.items.map((m, i) => (
-                  <li key={m.id} className="mb-5 break-inside-avoid lg:mb-6">
+                  <li key={m.id} className="mb-7 break-inside-avoid lg:mb-8">
                     <MessageCard
                       message={m}
                       index={i}
@@ -186,7 +185,7 @@ export function WallSection({
                     <li
                       key={`skeleton-${i}`}
                       aria-hidden="true"
-                      className="mb-5 break-inside-avoid lg:mb-6"
+                      className="mb-7 break-inside-avoid lg:mb-8"
                     >
                       <SkeletonCard lines={4 + (i % 2)} />
                     </li>
@@ -215,7 +214,7 @@ export function WallSection({
                   )}
                 </button>
                 <p className="text-sm text-ink-mute">
-                  {formatCount(wall.items.length)} من {formatCount(wall.total)} رسالة
+                  {formatCount(wall.items.length)} من {lettersCount(wall.total)}
                 </p>
               </div>
             )}
@@ -244,14 +243,10 @@ export function WallSection({
 function SortControl({ value, onChange }: { value: SortMode; onChange: (s: SortMode) => void }) {
   const options: { value: SortMode; label: string }[] = [
     { value: "new", label: COPY.sortNew },
-    { value: "top", label: `${COPY.sortTop} ❤️` },
+    { value: "top", label: COPY.sortTop },
   ];
   return (
-    <div
-      role="group"
-      aria-label="ترتيب الرسائل"
-      className="inline-flex shrink-0 rounded-full border-[1.5px] border-line bg-white/85 p-1 shadow-soft backdrop-blur"
-    >
+    <div role="group" aria-label="ترتيب الرسائل" className="-me-2 flex shrink-0 items-center">
       {options.map((o) => {
         const on = value === o.value;
         return (
@@ -260,11 +255,27 @@ function SortControl({ value, onChange }: { value: SortMode; onChange: (s: SortM
             type="button"
             aria-pressed={on}
             onClick={() => onChange(o.value)}
-            className={`min-h-11 rounded-full px-5 text-[0.95rem] font-bold transition-colors duration-200 ${
-              on ? "bg-plum text-white shadow-soft" : "text-ink-soft hover:text-plum"
+            className={`relative min-h-11 rounded-lg px-3 text-[0.98rem] font-bold transition-colors duration-200 ${
+              on ? "text-plum" : "text-ink-mute hover:text-plum"
             }`}
           >
             {o.label}
+            {on && (
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 60 6"
+                preserveAspectRatio="none"
+                className={styles.sortMark}
+              >
+                <path
+                  d="M1 4.2C12 2.2 26 1.6 38 2.4c7 .5 14 1.3 21 .6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
           </button>
         );
       })}
@@ -290,7 +301,7 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
       role="alert"
       className="mx-auto my-5 flex max-w-xl flex-wrap items-center justify-center gap-x-4 gap-y-2 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-2.5 text-[0.95rem] font-semibold text-orange-700"
     >
-      <span>ما قدرنا نحمّل الرسائل 😕</span>
+      <span>ما قدرنا نحمّل الرسائل</span>
       <button
         type="button"
         onClick={onRetry}
@@ -305,7 +316,7 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
 function EmptyWall() {
   return (
     <div className="mx-auto max-w-md py-10 text-center">
-      <Icon3D name="letter" size={132} className="mx-auto animate-float" />
+      <Icon3D name="envelope" size={148} className="mx-auto" />
       <p className="mt-5 text-xl leading-snug font-bold text-plum sm:text-2xl">{COPY.emptyWall}</p>
       <a href="#write" className="btn btn-primary mt-6 text-[1.05rem]">
         {COPY.heroCtaWrite}
@@ -318,22 +329,15 @@ function EmptyWall() {
 function Invitation({ q, onWrite }: { q: string; onWrite: (toName: string) => void }) {
   const name = cleanQueryName(q);
   return (
-    <div className={`${styles.invite} px-5 py-10 text-center sm:px-12 sm:py-14`}>
-      <div aria-hidden="true" className={styles.inviteIcons}>
-        <span className={`absolute start-0 top-0 ${styles.floaty}`}>
-          <Icon3D name="search" size={92} />
-        </span>
-        <span className={`absolute end-0 bottom-0 ${styles.floatyLate}`}>
-          <Icon3D name="letter" size={84} />
-        </span>
-      </div>
-      <h3 className="mt-5 text-[1.9rem] leading-tight font-bold text-plum sm:text-[2.6rem]">
+    <div className={`${styles.invite} mx-auto max-w-3xl px-5 pt-8 pb-9 text-center sm:px-12 sm:pt-10 sm:pb-12`}>
+      <Icon3D name="envelope" size={132} className="mx-auto" />
+      <h3 className="mt-4 text-[1.85rem] leading-tight font-bold text-plum sm:text-[2.4rem]">
         {COPY.emptySearchTitle}
       </h3>
-      <p className="mx-auto mt-3 max-w-md text-lg leading-relaxed font-semibold text-ink sm:text-[1.35rem]">
+      <p className="mx-auto mt-3 max-w-md text-lg leading-relaxed font-bold text-ink sm:text-[1.3rem]">
         {COPY.emptySearch}
       </p>
-      <p className="mx-auto mt-2 max-w-md text-sm text-ink-soft [overflow-wrap:anywhere]">
+      <p className="mx-auto mt-1 max-w-md text-[0.95rem] text-ink-soft [overflow-wrap:anywhere]">
         ما لقينا رسائل لـ «{q}» للحين.
       </p>
       <div className="mx-auto mt-7 flex max-w-lg flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">

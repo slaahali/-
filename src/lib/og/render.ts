@@ -4,34 +4,51 @@
 //
 // Only public fields are read from the message — never `contact` or anything
 // else a full record might carry.
+//
+// Rendering runs off the event loop (resvg's renderAsync uses the libuv pool),
+// so a cache-miss render doesn't stall other requests on the instance. The
+// native binding only accepts font *paths* (options are JSON-serialised; there
+// is no fontBuffers outside the wasm build) — fontdb reads them per render,
+// which costs ~0.1 ms; the paths and the logo data URI are resolved once.
 
+import fs from "node:fs";
 import path from "node:path";
-import { Resvg } from "@resvg/resvg-js";
+import { renderAsync } from "@resvg/resvg-js";
 import { cardStyle } from "@/lib/assets";
 import { COPY, SITE_URL } from "@/lib/config";
-import { formatCount, fromName, stampFor, toLine } from "@/lib/format";
+import { displayTo, formatCount, fromName, stampFor } from "@/lib/format";
 import type { PublicMessage } from "@/lib/types";
-import { buildOgSvg, OG_SANS, OG_W, stripEmoji, type OgScene } from "./svg";
+import { buildOgSvg, OG_SANS, OG_W, stripEmoji, type OgBrand, type OgScene } from "./svg";
 
 export type OgInput =
   | { kind: "default" }
   | { kind: "letter"; m: PublicMessage }
   | { kind: "search"; q: string; total: number };
 
+const ASSETS = path.join(process.cwd(), "assets");
+
 const FONT_FILES = [
+  "Molhim-Regular.ttf",
+  "Molhim-Bold.ttf",
   "IBMPlexSansArabic-Regular.ttf",
   "IBMPlexSansArabic-Bold.ttf",
   "ArefRuqaa-Regular.ttf",
   "ArefRuqaa-Bold.ttf",
-].map((f) => path.join(process.cwd(), "assets/fonts", f));
+].map((f) => path.join(ASSETS, "fonts", f));
+
+const LOGO_FILE = path.join(ASSETS, "brand-thechefz-logo.png");
+const LOGO_RATIO = 497 / 120;
 
 const OG_COPY = {
-  brandLine: `${COPY.brand} · يوم المعلم`,
-  letterLabel: "رسالة شكر",
-  memoryLabel: "في ذكرى",
+  letterLabel: "إلى",
+  memoryLabel: "إلى روح",
   countLabel: "رسالة شكر",
+  searchTo: "إلى",
   tagline: "اكتشف وش كتبوا 💜",
+  eyebrow: "يوم المعلم - ٥ أكتوبر",
   defaultLead: "اكتب رسالة شكر لمعلمك اللي أثّر فيك",
+  postmarkTop: "يوم المعلم",
+  postmarkBottom: "٥ أكتوبر",
 };
 
 function siteHost(): string {
@@ -42,11 +59,44 @@ function siteHost(): string {
   }
 }
 
+let logoUri: string | null | undefined;
+/** The official logo as a data: URI (read once). null when the file is missing → wordmark. */
+function logoDataUri(): string | null {
+  if (logoUri === undefined) {
+    try {
+      logoUri = `data:image/png;base64,${fs.readFileSync(LOGO_FILE).toString("base64")}`;
+    } catch {
+      logoUri = null;
+    }
+  }
+  return logoUri;
+}
+
+function brand(): OgBrand {
+  return {
+    logo: logoDataUri(),
+    logoRatio: LOGO_RATIO,
+    wordmark: COPY.brand,
+    host: siteHost(),
+    postmarkTop: OG_COPY.postmarkTop,
+    postmarkBottom: OG_COPY.postmarkBottom,
+  };
+}
+
+const dateFmt = new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  timeZone: "Asia/Riyadh",
+});
+
+function postedOn(iso: string): string {
+  const t = new Date(iso);
+  return Number.isFinite(t.getTime()) ? dateFmt.format(t) : "";
+}
+
 /** Maps domain data to plain scene data (all text emoji-free). */
 export function sceneFor(input: OgInput): OgScene {
-  const host = siteHost();
-  const brandLine = OG_COPY.brandLine;
-
   if (input.kind === "letter") {
     const m = input.m;
     const style = cardStyle(m);
@@ -54,16 +104,24 @@ export function sceneFor(input: OgInput): OgScene {
     const name = stripEmoji(fromName({ fromName: m.fromName })) || COPY.anonymousFrom;
     return {
       kind: "letter",
-      label: memory ? OG_COPY.memoryLabel : OG_COPY.letterLabel,
-      to: stripEmoji(toLine({ title: m.title, toName: m.toName, inMemory: memory })),
+      toLabel: memory ? OG_COPY.memoryLabel : OG_COPY.letterLabel,
+      toName: stripEmoji(displayTo({ title: m.title, toName: m.toName })),
       school: (m.school && stripEmoji(m.school)) || null,
       body: stripEmoji(m.body),
       signature: `— ${name}`,
+      date: postedOn(m.createdAt),
       stamp: stripEmoji(stampFor({ inMemory: memory })),
       memory,
-      palette: { accent: style.accent, bg: style.bg, ink: style.ink, gradient: style.gradient },
-      brandLine,
-      host,
+      palette: {
+        key: style.key,
+        accent: style.accent,
+        bg: style.bg,
+        ink: style.ink,
+        gradient: style.gradient,
+        icon: style.icon,
+      },
+      seed: m.id,
+      brand: brand(),
     };
   }
 
@@ -75,37 +133,36 @@ export function sceneFor(input: OgInput): OgScene {
       total,
       countNumber: formatCount(total),
       countLabel: OG_COPY.countLabel,
-      toQuery: q ? `إلى «${q}»` : "",
+      toLabel: OG_COPY.searchTo,
+      query: q,
       tagline: stripEmoji(OG_COPY.tagline),
       emptyTitle: stripEmoji(COPY.emptySearchTitle),
       emptyLead: stripEmoji(COPY.emptySearch),
       emptyCta: stripEmoji(COPY.heroCtaWrite),
-      brandLine,
-      host,
+      brand: brand(),
     };
   }
 
-  // "كلنا كان لنا معلّم": the last word is set big in Ruqaa.
+  // "كلنا كان لنا معلّم": the last word is set big in orange.
   const title = stripEmoji(COPY.heroTitle);
   const cut = title.lastIndexOf(" ");
   return {
     kind: "default",
-    badge: stripEmoji(COPY.badge.replace(/\s*✨\s*/g, " · ")),
+    eyebrow: OG_COPY.eyebrow,
     titleLead: cut > 0 ? title.slice(0, cut) : "",
     titleWord: cut > 0 ? title.slice(cut + 1) : title,
     lead: OG_COPY.defaultLead,
-    brandLine: stripEmoji(COPY.footerCampaign),
-    host,
+    brand: brand(),
   };
 }
 
-function rasterize(svg: string): Buffer {
-  const resvg = new Resvg(svg, {
+async function rasterize(svg: string): Promise<Buffer> {
+  const img = await renderAsync(svg, {
     fitTo: { mode: "width", value: OG_W },
     font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: OG_SANS },
     logLevel: "off",
   });
-  return resvg.render().asPng();
+  return img.asPng();
 }
 
 // --- tiny in-memory LRU (per server instance; the CDN does the heavy lifting)
@@ -126,7 +183,7 @@ function fnv1a(s: string): string {
 function cacheKey(input: OgInput): string {
   if (input.kind === "letter") {
     const m = input.m;
-    return `l:${m.id}:${fnv1a([m.title, m.toName, m.school, m.body, m.fromName, m.variant, m.inMemory].join("\u0001"))}`;
+    return `l:${m.id}:${fnv1a([m.title, m.toName, m.school, m.body, m.fromName, m.variant, m.inMemory, m.createdAt].join("\u0001"))}`;
   }
   // The invitation never shows q, so every no-result search shares one entry.
   if (input.kind === "search") return input.total >= 1 ? `s:${Math.trunc(input.total)}:${input.q}` : "s:0";

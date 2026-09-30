@@ -70,23 +70,41 @@ describe("wall SSR", () => {
     expect(html).toContain("جدار الامتنان");
     expect(html).toContain("أستاذة نورة القحطاني");
     expect(html).toContain("إلى روح");
-    expect(html).toContain("في ذكرى 🕊️");
     expect(html).toContain("دعوة بالرحمة");
+    expect(html).toContain("42 رسالة على الجدار");
     expect(html).toContain("عرض المزيد");
     expect(html).not.toContain('role="dialog"');
   });
 
   it("shows the result count for a shared search", () => {
     const html = render({ items: [letter], q: "نورة", total: 1 });
-    expect(html).toContain("1 رسالة لـ «نورة»");
+    expect(html).toContain("رسالة لـ «نورة»");
+    expect(html).not.toContain("1 رسالة");
     expect(html).toContain('value="نورة"');
   });
 
   it("turns an empty search into an invitation without the honorific", () => {
     const html = render({ items: [], q: "الأستاذة منى" });
     expect(html).toContain("ما أحد كتب لك للحين؟");
-    expect(html).toContain("اكتب رسالة لـ «منى» ✍️");
-    expect(html).toContain("اكتب لأحد علّمك ✍️");
+    expect(html).toContain("اكتب رسالة لـ «منى»");
+    expect(html).not.toContain("«الأستاذة منى»</button>");
+  });
+
+  it("inflects the result count", () => {
+    const three = render({ items: [letter, memory, long], q: "نورة", total: 3 });
+    expect(three).toContain("3 رسائل لـ «نورة»");
+    expect(render({ items: [letter, memory], q: "نورة", total: 2 })).toContain("رسالتين لـ «نورة»");
+    expect(render({ items: [letter], q: "نورة", total: 11 })).toContain("11 رسالة لـ «نورة»");
+  });
+
+  it("draws the stamp + postmark date, and a dove (no heart icon) for memory letters", () => {
+    const html = render({ items: [letter] });
+    expect(html).toContain('dateTime="2026-09-29T08:00:00.000Z"');
+    expect(html).toContain("29 سبتمبر");
+    expect(html).toContain("/3d/books.webp"); // variant 1 → the orange stamp's icon
+    const mem = render({ items: [memory] });
+    expect(mem).not.toContain("/3d/"); // dove glyph, not the heart-sealed letter icon
+    expect(mem).not.toContain("💜");
   });
 
   it("renders the empty wall", () => {
@@ -112,17 +130,18 @@ describe("letter view SSR", () => {
     const html = render({ items: [letter], open: letter });
     expect(html).toContain('role="dialog"');
     expect(html).toContain('aria-modal="true"');
-    expect(html).toContain("رسالة إلى");
+    expect(html).toContain("أستاذة نورة القحطاني");
     expect(html).toContain("شكراً معلمي");
-    expect(html).toContain("أرسل لها هدية");
+    expect(html).toContain("أرسل لها");
     expect(html).toContain("— سارة");
   });
 
   it("renders memory letters calmly: respectful wording, no gift", () => {
     const html = render({ items: [memory], open: memory });
-    expect(html).toContain("إلى روح الدكتور سعد");
+    expect(html).toContain("إلى روح");
+    expect(html).toContain("الدكتور سعد");
     expect(html).toContain("في ذكراك 🤍");
-    expect(html).not.toContain("هدية 🎁");
+    expect(html).not.toContain("هدية");
     expect(html).toContain("— أحد طلابك");
   });
 });

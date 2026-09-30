@@ -1,37 +1,100 @@
 /* Wall + letter cards. Colours come from cardStyle(m) via --card-* custom
    properties set inline; brand tokens are read with hex fallbacks. */
 
+/* ---- the card: a folded note in the envelope colour ---- */
 .card {
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --card-accent-ink: color-mix(in oklab, var(--card-accent) 66%, var(--card-ink));
+  --ear: 1.6rem;
+  --pad: 1.25rem;
+  --card-accent-ink: color-mix(in oklab, var(--card-accent) 56%, var(--card-ink));
+  --card-soft: color-mix(in oklab, var(--card-ink) 70%, var(--card-bg));
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
-  padding: 1.55rem 1.3rem 0.8rem;
-  border-radius: 22px;
-  background-color: var(--card-bg);
+  padding: 1.35rem var(--pad) 0.35rem;
   color: var(--card-ink);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.7),
-    0 14px 30px -18px rgb(105 29 78 / 0.34),
-    0 2px 6px -2px rgb(105 29 78 / 0.08);
   rotate: var(--tilt, 0deg);
   transition:
     rotate 0.45s var(--ease),
     translate 0.45s var(--ease),
-    box-shadow 0.45s var(--ease),
     opacity 0.3s;
+}
+@media (min-width: 640px) {
+  .card {
+    --pad: 1.4rem;
+  }
+}
+
+/* Paper: tint + grain, with the bottom-start corner folded in. The shadow sits
+   on the wrapper so it follows the clipped shape. */
+.paper {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgb(61 15 45 / 0.14)) drop-shadow(0 12px 16px rgb(105 29 78 / 0.12));
+}
+.sheet {
+  position: absolute;
+  inset: 0;
+  border-radius: 3px;
+  background-color: var(--card-bg);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .24 0 0 0 0 .08 0 0 0 0 .18 0 0 0 .3 -.09'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E"),
+    linear-gradient(172deg, rgb(255 255 255 / 0.5), rgb(255 255 255 / 0) 38%),
+    linear-gradient(to top, rgb(61 15 45 / 0.035), transparent 30%);
+  /* RTL: the start corner is on the right */
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - var(--ear)),
+    calc(100% - var(--ear)) 100%,
+    0 100%
+  );
+}
+.sheet:dir(ltr) {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, var(--ear) 100%, 0 calc(100% - var(--ear)));
+}
+/* The folded-over flap: the paper's back, lighter, casting a small shadow. */
+.dogEar {
+  position: absolute;
+  bottom: 0;
+  inset-inline-start: 0;
+  width: var(--ear);
+  height: var(--ear);
+  filter: drop-shadow(-1px -1px 1.5px rgb(61 15 45 / 0.16));
+}
+.dogEar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--card-bg) 55%, #fff) 30%,
+    color-mix(in oklab, var(--card-bg) 88%, var(--card-ink)) 100%
+  );
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+.dogEar:dir(ltr) {
+  filter: drop-shadow(1px -1px 1.5px rgb(61 15 45 / 0.16));
+}
+.dogEar:dir(ltr)::before {
+  background: linear-gradient(
+    225deg,
+    color-mix(in oklab, var(--card-bg) 55%, #fff) 30%,
+    color-mix(in oklab, var(--card-bg) 88%, var(--card-ink)) 100%
+  );
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 @media (hover: hover) {
   .card:hover {
     rotate: 0deg;
-    translate: 0 -5px;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.7),
-      0 28px 54px -24px rgb(105 29 78 / 0.42),
-      0 6px 14px -6px rgb(105 29 78 / 0.12);
+    translate: 0 -4px;
+  }
+  .card:hover .readMore {
+    gap: 0.6rem;
   }
 }
 .card:focus-within {
@@ -46,47 +109,74 @@
   z-index: 5;
 }
 
-/* Accent band along the top edge. */
-.deco {
+/* ---- postage stamp (top-end corner) ---- */
+.stamp {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  overflow: hidden;
+  top: 0.9rem;
+  inset-inline-end: 0.85rem;
+  z-index: 0;
+  width: 54px;
+  height: 60px;
+  rotate: -3deg;
   pointer-events: none;
 }
-.deco::before {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  height: 5px;
-  background: var(--card-accent);
+.stampFace {
+  --p: 6px;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 5px;
+  background: #fffcf6;
+  filter: drop-shadow(0 1px 1.5px rgb(61 15 45 / 0.22));
+  -webkit-mask:
+    radial-gradient(circle at center, #0000 1.9px, #000 2.3px) calc(var(--p) / -2)
+      calc(var(--p) / -2) / var(--p) var(--p) round,
+    linear-gradient(#000 0 0) center / calc(100% - var(--p)) calc(100% - var(--p)) no-repeat;
+  mask:
+    radial-gradient(circle at center, #0000 1.9px, #000 2.3px) calc(var(--p) / -2)
+      calc(var(--p) / -2) / var(--p) var(--p) round,
+    linear-gradient(#000 0 0) center / calc(100% - var(--p)) calc(100% - var(--p)) no-repeat;
 }
-
-/* Little wax seal with a heart, top end corner. */
-.seal {
-  position: absolute;
-  top: 1rem;
-  inset-inline-end: 1rem;
+.stampPanel {
   display: grid;
   place-items: center;
-  width: 2.1rem;
-  height: 2.1rem;
-  border-radius: 50%;
-  color: #fff;
+  width: 100%;
+  height: 100%;
   background: radial-gradient(
-    circle at 35% 30%,
-    color-mix(in srgb, var(--card-accent) 55%, #fff) 0%,
-    var(--card-accent) 62%
+    circle at 50% 38%,
+    #fff 0%,
+    color-mix(in srgb, var(--card-accent) 20%, #fff) 78%
   );
-  box-shadow:
-    0 4px 10px -3px color-mix(in srgb, var(--card-accent) 70%, transparent),
-    inset 0 -2px 3px rgb(0 0 0 / 0.14);
-  rotate: -12deg;
-  pointer-events: none;
+  box-shadow: inset 0 0 0 1.25px color-mix(in srgb, var(--card-accent) 75%, transparent);
+}
+.dove {
+  color: #fbf8fc;
+  filter: drop-shadow(0 1px 0.5px rgb(47 39 52 / 0.35));
+}
+.memory .stampPanel {
+  background: linear-gradient(160deg, #c9c0cf, #8d8093);
+  box-shadow: inset 0 0 0 1.25px rgb(255 255 255 / 0.5);
+}
+.postmark {
+  position: absolute;
+  bottom: -15px;
+  inset-inline-end: -18px;
+  width: 96px;
+  height: 48px;
+  color: color-mix(in oklab, var(--card-ink) 58%, transparent);
+  mix-blend-mode: multiply;
+  rotate: -9deg;
+  overflow: visible;
 }
 
-/* Stretched button: the whole card opens the letter; the actions sit above it. */
+/* ---- address block ---- */
+.address {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-height: 4.6rem;
+  padding-inline-end: 5.9rem;
+}
 .open {
   display: block;
   width: 100%;
@@ -98,81 +188,98 @@
   position: absolute;
   inset: 0;
   z-index: 1;
-  border-radius: inherit;
 }
 .open:focus-visible {
   outline: none;
 }
 .open:focus-visible::after {
   outline: 3px solid var(--color-orange, #eb652c);
-  outline-offset: 4px;
+  outline-offset: 5px;
+  border-radius: 4px;
+}
+.to {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--card-soft);
+}
+.name {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.school {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--card-soft);
+  overflow-wrap: anywhere;
+}
+
+/* A fold line across the note, where it was folded to fit the envelope. */
+.crease {
+  display: block;
+  height: 2px;
+  margin: 0.9rem calc(-1 * var(--pad)) 0.85rem;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--card-ink) 9%, transparent),
+    rgb(255 255 255 / 0.55)
+  );
 }
 
 .body {
-  font-size: 1rem;
-  line-height: 1.9;
+  font-size: 1.02rem;
+  line-height: 1.95;
   white-space: pre-line;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 7;
-  line-clamp: 7;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
   overflow: hidden;
-  /* faint notebook rules under each line */
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(1lh - 1px),
-    color-mix(in srgb, var(--card-ink) 8%, transparent) calc(1lh - 1px),
-    color-mix(in srgb, var(--card-ink) 8%, transparent) 1lh
-  );
 }
 .clamped {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.8em), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.8em), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.6em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.6em), transparent);
 }
 
+.signoff {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+}
 .readMore {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  width: fit-content;
-  font-size: 0.875rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: var(--card-accent-ink);
   transition: gap 0.25s var(--ease);
 }
-.card:hover .readMore {
-  gap: 0.65rem;
-}
-
 .signature {
+  margin-inline-start: auto;
+  font-size: 1.35rem;
+  line-height: 1.4;
   color: var(--card-accent-ink);
+  overflow-wrap: anywhere;
+  text-align: end;
 }
 
-.memoryTag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  width: fit-content;
-  padding: 0.15rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  background: rgb(255 255 255 / 0.7);
-  border: 1px solid color-mix(in srgb, var(--card-accent) 30%, transparent);
-  color: var(--card-accent-ink);
-}
-
+/* like · share · ⋯ — sits past the folded corner */
 .actions {
   position: relative;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  margin-top: 0.1rem;
-  padding-top: 0.6rem;
-  border-top: 1.5px dashed color-mix(in srgb, var(--card-accent) 24%, transparent);
+  gap: 0.1rem;
+  margin-top: 0.35rem;
+  margin-inline: calc(var(--ear) - var(--pad) + 0.55rem) -0.6rem;
 }
 
 /* In-memory letters: calm — no tilt, no playful lift. */
@@ -187,25 +294,26 @@
 
 /* A letter this visitor just published. */
 .fresh {
-  animation:
-    fresh-in 0.7s var(--ease) backwards,
-    glow 1.8s ease-in-out 0.6s 3;
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--card-accent) 45%, transparent),
-    0 22px 48px -20px color-mix(in srgb, var(--card-accent) 75%, transparent);
+  animation: fresh-in 0.7s var(--ease) backwards;
 }
-.freshBadge {
+/* A warm glow that follows the paper, folded corner included. */
+.fresh .paper {
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--card-accent) 80%, transparent))
+    drop-shadow(0 14px 26px color-mix(in srgb, var(--card-accent) 42%, transparent));
+}
+.freshTag {
   position: absolute;
-  top: -0.8rem;
-  inset-inline-start: 1.1rem;
+  top: -0.75rem;
+  inset-inline-start: 1rem;
   z-index: 3;
-  padding: 0.2rem 0.75rem;
-  border-radius: 999px;
+  padding: 0.1rem 0.65rem;
+  border-radius: 3px;
   background: var(--card-accent);
   color: #fff;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--card-accent) 80%, transparent);
+  rotate: -2deg;
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--card-accent) 80%, transparent);
   pointer-events: none;
 }
 @keyframes fresh-in {
@@ -213,13 +321,6 @@
     opacity: 0;
     translate: 0 -18px;
     scale: 0.96;
-  }
-}
-@keyframes glow {
-  50% {
-    box-shadow:
-      0 0 0 8px color-mix(in srgb, var(--card-accent) 16%, transparent),
-      0 26px 60px -20px color-mix(in srgb, var(--card-accent) 85%, transparent);
   }
 }
 
@@ -241,9 +342,9 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1.6rem 1.3rem 1.2rem;
-  border-radius: 22px;
+  gap: 0.7rem;
+  padding: 1.4rem 1.25rem 1.2rem;
+  border-radius: 3px;
   background: #f4ebe3;
   overflow: hidden;
 }
@@ -256,7 +357,7 @@
 }
 .bar {
   height: 0.8rem;
-  border-radius: 999px;
+  border-radius: 2px;
   background: rgb(105 29 78 / 0.08);
 }
 @keyframes shimmer {
@@ -279,44 +380,35 @@
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(40rem 22rem at 85% 0%, rgb(235 101 44 / 0.1), transparent 70%),
-    radial-gradient(36rem 24rem at 10% 12%, rgb(167 55 132 / 0.08), transparent 70%);
+  background: radial-gradient(42rem 22rem at 100% 0%, rgb(235 101 44 / 0.07), transparent 70%);
 }
 
+/* Hand-drawn underline under the active sort option. */
+.sortMark {
+  position: absolute;
+  inset-inline: 0.55rem;
+  bottom: 0.35rem;
+  height: 6px;
+  color: var(--color-orange, #eb652c);
+}
+
+/* An unwritten sheet: the search found nobody, so write the first one. */
 .invite {
   position: relative;
-  overflow: hidden;
-  border-radius: 28px;
-  border: 1.5px solid var(--color-orange-100, #fde6db);
-  background:
-    radial-gradient(28rem 16rem at 100% 0%, rgb(247 166 79 / 0.22), transparent 70%),
-    radial-gradient(26rem 18rem at 0% 100%, rgb(167 55 132 / 0.14), transparent 70%),
-    linear-gradient(180deg, #fffaf5, #fdf1ea);
-  box-shadow: 0 30px 70px -40px rgb(105 29 78 / 0.45);
-}
-.inviteIcons {
-  position: relative;
-  width: 9.5rem;
-  height: 8rem;
-  margin-inline: auto;
-}
-.floaty {
-  animation: floaty 6s ease-in-out infinite;
-}
-.floatyLate {
-  animation: floaty 6s ease-in-out -3s infinite;
-}
-@keyframes floaty {
-  0%,
-  100% {
-    translate: 0 0;
-    rotate: -4deg;
-  }
-  50% {
-    translate: 0 -10px;
-    rotate: 3deg;
-  }
+  border-radius: 3px;
+  background-color: #fffdf8;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .24 0 0 0 0 .08 0 0 0 0 .18 0 0 0 .3 -.09'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(2.2rem - 1px),
+      rgb(105 29 78 / 0.07) calc(2.2rem - 1px),
+      rgb(105 29 78 / 0.07) 2.2rem
+    );
+  box-shadow:
+    0 1px 1px rgb(61 15 45 / 0.12),
+    0 18px 30px -18px rgb(105 29 78 / 0.3);
 }
 
 .toast {

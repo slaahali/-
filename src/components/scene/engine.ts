@@ -1,15 +1,16 @@
 // Imperative three.js engine behind <LettersScene>. Owns the renderer, the
 // floating letters, pointer interaction, the hover label and every GPU
 // resource; `dispose()` releases all of it (safe to call twice).
+//
+// The field holds the newest letters (up to profile.maxReal); blank filler
+// letters only pad it while there are fewer than profile.minField.
 
 import {
   BufferGeometry,
   CanvasTexture,
   Color,
-  DirectionalLight,
   Fog,
   FrontSide,
-  HemisphereLight,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -21,9 +22,8 @@ import {
   WebGLRenderer,
 } from "three";
 import { cardStyle, colorAt } from "@/lib/assets";
-import { NEW_LETTER_EVENT, type SceneLetter } from "@/lib/events";
+import { LETTER_HIDDEN_EVENT, NEW_LETTER_EVENT, type SceneLetter } from "@/lib/events";
 import {
-  ANTIALIAS_MAX_DPR,
   CALM_DIM,
   CAMERA_Z,
   DEPTH_FADE,
@@ -36,14 +36,12 @@ import {
   FOG_NEAR,
   FOV_LANDSCAPE,
   FOV_PORTRAIT,
-  HEMI,
   HOVER,
   INTRO,
   LABEL,
   LAYOUT_SEED,
   LETTER_W,
   LOOK_Z,
-  MAX_DPR,
   MOBILE,
   MOBILE_QUERY,
   MOTION,
@@ -54,11 +52,11 @@ import {
   BACK_SHADE,
   ROUGHNESS,
   SCROLL,
-  SUN,
   SWAP_FADE,
   SWAY,
   TAP,
   TILT,
+  fieldSize,
   type SceneProfile,
 } from "./constants";
 import { createDust, type Dust } from "./dust";
@@ -76,8 +74,12 @@ import {
   type ResolvedSlot,
   type ViewParams,
 } from "./layout";
+import { isImmersiveOpen, subscribeImmersive } from "./immersive-state";
 import { hashString, mulberry32, range } from "./random";
-import { createLetterTexture, loadHandFamily, paintLetterCanvas, paperBackColor, type PaintSpec } from "./textures";
+import { addLights, contentKey, createRenderer, eventLetterId, labelSpot, mountCanvas, toSafeLetter } from "./shared";
+import { createLetterTexture, loadPaperFamily, paintLetterCanvas, paperBackColor, type PaintSpec } from "./textures";
+
+export { toSafeLetter } from "./shared";
 
 export interface EngineOptions {
   root: HTMLDivElement;
@@ -142,22 +144,6 @@ interface PointerDown {
 
 const TAU = Math.PI * 2;
 
-/** Accepts only the public SceneLetter fields (never anything else from the event). */
-export function toSafeLetter(x: unknown): SceneLetter | null {
-  if (!x || typeof x !== "object") return null;
-  const o = x as Record<string, unknown>;
-  if (typeof o.id !== "string" || !o.id) return null;
-  return {
-    id: o.id,
-    label: typeof o.label === "string" ? o.label : "",
-    snippet: typeof o.snippet === "string" ? o.snippet : "",
-    variant: typeof o.variant === "number" && Number.isFinite(o.variant) ? o.variant : 0,
-    inMemory: o.inMemory === true,
-  };
-}
-
-const contentKey = (l: SceneLetter) => `${l.snippet}\u0000${colorAt(l.variant).key}\u0000${l.inMemory ? 1 : 0}`;
-
 export class LettersEngine {
   private readonly root: HTMLDivElement;
   private readonly labelAnchor: HTMLElement;
@@ -189,6 +175,10 @@ export class LettersEngine {
   private paintQueue: LetterNode[] = [];
   private desired: SceneLetter[] = [];
   private pendingNew: SceneLetter[] = [];
+  /** Taken down during this visit: never shown again, whatever the props say. */
+  private readonly hidden = new Set<string>();
+  /** Slots [0, active) are in use; the Mitchell order keeps any prefix well spread. */
+  private active = 0;
   private family = "";
   private addCounter = 0;
 
@@ -203,6 +193,8 @@ export class LettersEngine {
   private intersecting = true;
   private contextLost = false;
   private reduced = false;
+  /** The immersive tunnel is open on top of the hero. */
+  private covered = isImmersiveOpen();
 
   private pointerX = 0;
   private pointerY = 0;
@@ -234,20 +226,13 @@ export class LettersEngine {
     this.onOpen = opts.onOpen;
     this.profile = window.matchMedia(MOBILE_QUERY).matches ? MOBILE : DESKTOP;
 
-    const dpr = window.devicePixelRatio || 1;
-    this.renderer = new WebGLRenderer({
-      alpha: true,
-      antialias: dpr <= ANTIALIAS_MAX_DPR,
-      powerPreference: "high-performance",
-    });
-    this.renderer.setPixelRatio(Math.min(dpr, MAX_DPR));
-    this.renderer.setClearColor(0x000000, 0);
+    this.renderer = createRenderer();
     this.anisotropy = Math.max(1, Math.min(this.profile.anisotropy, this.renderer.capabilities.getMaxAnisotropy()));
 
     const canvas = this.renderer.domElement;
     this.canvas = canvas;
     try {
-      this.rawSlots = generateSlots(this.profile.total, mulberry32(LAYOUT_SEED), this.profile.spread);
+      this.rawSlots = generateSlots(this.profile.maxReal, mulberry32(LAYOUT_SEED), this.profile.spread);
       this.slots = new Array<LetterNode | null>(this.rawSlots.length).fill(null);
       this.camera = new PerspectiveCamera(FOV_LANDSCAPE, 1, 0.1, 60);
       this.geometry = createLetterGeometry();
@@ -257,27 +242,13 @@ export class LettersEngine {
       throw err;
     }
 
-    canvas.setAttribute("aria-hidden", "true");
-    Object.assign(canvas.style, {
-      position: "absolute",
-      inset: "0",
-      width: "100%",
-      height: "100%",
-      display: "block",
-      touchAction: "pan-y pinch-zoom",
-    });
-    const rootStyle = getComputedStyle(this.root);
-    if (rootStyle.position === "static") this.root.style.position = "relative";
-    this.preferLabelLeft = rootStyle.direction === "rtl";
-    this.root.insertBefore(canvas, this.root.firstChild);
+    this.preferLabelLeft = getComputedStyle(this.root).direction === "rtl";
+    mountCanvas(this.root, canvas, "pan-y pinch-zoom");
 
     this.camera.position.set(0, 0, CAMERA_Z);
 
     this.scene.fog = new Fog(FOG_COLOR, FOG_NEAR, FOG_FAR);
-    this.scene.add(new HemisphereLight(HEMI.sky, HEMI.ground, HEMI.intensity));
-    const sun = new DirectionalLight(SUN.color, SUN.intensity);
-    sun.position.set(SUN.position[0], SUN.position[1], SUN.position[2]);
-    this.scene.add(sun);
+    addLights(this.scene);
 
     this.scene.add(this.dust.points);
 
@@ -293,7 +264,7 @@ export class LettersEngine {
     const desired: SceneLetter[] = [];
     for (const raw of list) {
       const l = toSafeLetter(raw);
-      if (!l || seen.has(l.id)) continue;
+      if (!l || seen.has(l.id) || this.hidden.has(l.id)) continue;
       seen.add(l.id);
       desired.push(l);
       if (desired.length >= this.profile.maxReal) break;
@@ -304,7 +275,7 @@ export class LettersEngine {
 
   addNewLetter(raw: unknown) {
     const letter = toSafeLetter(raw);
-    if (!letter || this.disposed) return;
+    if (!letter || this.disposed || this.hidden.has(letter.id)) return;
     if (!this.ready) {
       this.pendingNew.push(letter);
       return;
@@ -335,6 +306,17 @@ export class LettersEngine {
         path: null,
       };
     }
+  }
+
+  /** A letter stopped being public (e.g. a removal request): let it go, sticky or not. */
+  hideLetter(id: string) {
+    if (!id || this.disposed) return;
+    this.hidden.add(id);
+    this.desired = this.desired.filter((l) => l.id !== id);
+    this.pendingNew = this.pendingNew.filter((l) => l.id !== id);
+    if (!this.ready) return;
+    const node = this.findNode(id);
+    if (node) this.vacate(node.slot);
   }
 
   dispose() {
@@ -370,7 +352,7 @@ export class LettersEngine {
   // --------------------------------------------------------------- boot ---
 
   private async boot() {
-    const family = await loadHandFamily(1500);
+    const family = await loadPaperFamily(1500);
     if (this.disposed) return;
     this.family = family;
 
@@ -385,16 +367,18 @@ export class LettersEngine {
       this.fillerTextures.push(createLetterTexture(paintLetterCanvas(spec, this.profile.fillerTex, family), this.anisotropy));
     }
 
-    // Real letters take the preferred (near, outside the calm zone) slots.
+    // Real letters take the preferred (near, outside the calm zone) slots of the active field.
     const n = this.desired.length;
+    this.active = fieldSize(n, this.profile);
+    const order = this.preference.filter((i) => i < this.active);
     this.desired.forEach((letter, i) => {
-      const node = this.createNode("real", letter, this.preference[i]);
+      const node = this.createNode("real", letter, order[i]);
       node.addedAt = n - i; // prop order is newest first
-      this.assign(this.preference[i], node);
+      this.assign(order[i], node);
       this.paintQueue.push(node);
     });
     this.addCounter = n + 1;
-    for (let i = 0; i < this.slots.length; i++) {
+    for (let i = 0; i < this.active; i++) {
       if (!this.slots[i]) this.assign(i, this.createNode("filler", null, i));
     }
     for (const node of this.slots) {
@@ -523,6 +507,7 @@ export class LettersEngine {
     node.fadeRate = 1 / SWAP_FADE;
     this.dying.push(node);
     if (this.hovered === node) this.setHovered(null);
+    if (this.labelNode === node) this.hideLabel();
   }
 
   private disposeNode(node: LetterNode) {
@@ -545,13 +530,19 @@ export class LettersEngine {
     return null;
   }
 
-  /** A filler slot while under the real-letter cap (nearest first), else the oldest real letter's. */
-  private pickSlot(): number {
+  private realCount(): number {
     let real = 0;
     for (const n of this.slots) if (n?.kind === "real") real++;
-    if (real < this.profile.maxReal) {
-      for (const i of this.preference) if (this.slots[i]?.kind !== "real") return i;
-    }
+    return real;
+  }
+
+  /**
+   * Where a new real letter goes: a free (blank or filler) active slot, nearest
+   * first; else the field grows by one slot; else the oldest real letter's slot.
+   */
+  private pickSlot(): number {
+    for (const i of this.preference) if (i < this.active && this.slots[i]?.kind !== "real") return i;
+    if (this.active < this.slots.length) return this.active++;
     let best = -1;
     let bestAt = Infinity;
     for (let i = 0; i < this.slots.length; i++) {
@@ -571,7 +562,7 @@ export class LettersEngine {
       if (!node || node.kind !== "real" || !node.letter) continue;
       const next = want.get(node.letter.id);
       if (!next) {
-        if (!node.sticky) this.fillSlotWithFiller(i);
+        if (!node.sticky) this.vacate(i);
         continue;
       }
       want.delete(next.id);
@@ -594,10 +585,18 @@ export class LettersEngine {
     }
   }
 
-  private fillSlotWithFiller(slot: number) {
-    const node = this.createNode("filler", null, slot);
-    node.fadeRate = 1 / SWAP_FADE;
-    this.assign(slot, node);
+  /** A real letter leaves: blank paper takes its place while the field is short, else the slot empties. */
+  private vacate(slot: number) {
+    const old = this.slots[slot];
+    if (!old) return;
+    if (this.realCount() - (old.kind === "real" ? 1 : 0) < this.profile.minField) {
+      const node = this.createNode("filler", null, slot);
+      node.fadeRate = 1 / SWAP_FADE;
+      this.assign(slot, node);
+    } else {
+      this.retire(old);
+      this.slots[slot] = null;
+    }
   }
 
   // ------------------------------------------------------------- layout ---
@@ -729,6 +728,21 @@ export class LettersEngine {
     const onNew = (e: Event) => this.addNewLetter((e as CustomEvent<unknown>).detail);
     window.addEventListener(NEW_LETTER_EVENT, onNew);
     this.cleanups.push(() => window.removeEventListener(NEW_LETTER_EVENT, onNew));
+
+    const onHidden = (e: Event) => {
+      const id = eventLetterId(e);
+      if (id) this.hideLetter(id);
+    };
+    window.addEventListener(LETTER_HIDDEN_EVENT, onHidden);
+    this.cleanups.push(() => window.removeEventListener(LETTER_HIDDEN_EVENT, onHidden));
+
+    this.cleanups.push(
+      subscribeImmersive((open) => {
+        this.covered = open;
+        if (open) this.setHovered(null);
+        this.updateRunning();
+      }),
+    );
 
     const onVisibility = () => {
       this.pageVisible = document.visibilityState !== "hidden";
@@ -870,12 +884,14 @@ export class LettersEngine {
     const dist = this.camera.position.distanceTo(node.mesh.position);
     const pxPerUnit = this.height / (2 * halfHeightAt(Math.max(0.5, dist), this.camera.fov));
     const half = (LETTER_W / 2) * node.mesh.scale.x * pxPerUnit * 0.85;
-    const { gap, margin } = LABEL;
-    const leftX = sx - half - gap - this.labelW;
-    const rightX = sx + half + gap;
-    let x = this.preferLabelLeft ? (leftX >= margin ? leftX : rightX) : rightX + this.labelW <= this.width - margin ? rightX : leftX;
-    x = clamp(x, margin, Math.max(margin, this.width - this.labelW - margin));
-    const y = clamp(sy - this.labelH / 2, margin, Math.max(margin, this.height - this.labelH - margin));
+    const { x, y } = labelSpot(
+      sx,
+      sy,
+      half,
+      { w: this.labelW, h: this.labelH },
+      { w: this.width, h: this.height },
+      this.preferLabelLeft,
+    );
     this.labelAnchor.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
   }
 
@@ -896,6 +912,7 @@ export class LettersEngine {
       this.ready &&
       !this.disposed &&
       !this.paused &&
+      !this.covered &&
       this.pageVisible &&
       this.intersecting &&
       !this.contextLost;

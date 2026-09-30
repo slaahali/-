@@ -26,7 +26,7 @@ export function slotAhead(k: number, travel: number, g: TunnelGeom): number {
 
 /** First slot of the live window: slots further than `behind` behind the camera recycle. */
 export function windowStart(travel: number, g: TunnelGeom): number {
-  return Math.max(0, Math.floor((travel - g.readDist - g.behind) / g.spacing) + 1);
+  return Math.max(0, Math.ceil((travel - g.readDist - g.behind) / g.spacing));
 }
 
 /** The slot at reading distance (the letter the counter talks about). */

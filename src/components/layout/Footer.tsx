@@ -14,35 +14,34 @@ export function Footer() {
             href={BRAND_URL}
             target="_blank"
             rel="noopener"
-            className="-m-1.5 inline-block rounded-xl p-1.5"
+            className="-mx-1.5 inline-flex min-h-11 items-center rounded-xl px-1.5"
           >
             <ChefzLogo height={28} />
             <span className="visually-hidden"> (تفتح في صفحة جديدة)</span>
           </a>
-          <p className="mt-4 text-lg font-bold text-plum">{COPY.footerCampaign} 💜</p>
+          <p className="mt-3 text-lg font-bold text-plum">{COPY.footerCampaign}</p>
           <p className="mt-2 text-[0.95rem] leading-7 text-ink-soft">{COPY.footerNote}</p>
         </div>
 
-        <div className="flex flex-col items-start gap-3 md:items-end">
-          <span className="inline-flex min-h-10 items-center rounded-full border border-plum-200 bg-white px-4 text-[0.95rem] font-bold text-plum">
+        <div className="flex flex-col items-start gap-2 md:items-end">
+          <p className="text-[1.05rem] font-bold text-plum" dir="auto">
             {HASHTAG}
-          </span>
+          </p>
           <GiftLink
             from="footer"
-            className="group inline-flex min-h-11 items-center gap-2 rounded-full bg-white ps-1.5 pe-4 font-bold text-orange-700 shadow-soft transition-transform duration-200 hover:-translate-y-px"
+            className="group -ms-2 inline-flex min-h-11 items-center gap-1.5 rounded-xl px-2 font-bold text-orange-700 transition-colors hover:bg-white md:ms-0 md:-me-2"
           >
-            <span className="grid size-8 place-items-center rounded-full bg-orange-50">
-              <Icon3D name="gift" size={28} />
-            </span>
+            <Icon3D name="gift" size={32} className="-my-1" />
             {COPY.giftLink}
           </GiftLink>
         </div>
       </div>
 
+      {/* Bottom padding keeps the fixed sound button (bottom-end) off the last line. */}
       <div className="border-t border-plum-100">
-        <div className="container-page flex flex-wrap items-center justify-between gap-2 py-5 text-sm text-ink-mute">
+        <div className="container-page flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-5 pb-[max(1.25rem,calc(env(safe-area-inset-bottom)+4rem))] text-sm text-ink-mute xl:pb-5">
           <span>© {COPY.brand}</span>
-          <span>صُنع بحب لكل معلم 💜</span>
+          <span>{COPY.footerMadeWith}</span>
         </div>
       </div>
     </footer>

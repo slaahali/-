@@ -127,6 +127,34 @@ export function buildRequestBody(f: FormFields, website: string): CreateMessageB
 }
 
 // ---------------------------------------------------------------------------
+// Prefill from the search CTAs ("اكتب رسالة لـ «…»" / "اكتب لأحد علّمك").
+// ---------------------------------------------------------------------------
+
+export type PrefillAction =
+  | { kind: "none" }
+  /** Write the name in. `clearTitle`: the old title belonged to someone else. */
+  | { kind: "set"; toName: string; clearTitle: boolean }
+  /** An unfinished letter to someone else is on the paper: ask before readdressing it. */
+  | { kind: "ask"; toName: string };
+
+/**
+ * What a search CTA does to the letter on the paper. The generic CTA (no name)
+ * leaves it alone; a name fills an empty or body-less addressee; a letter that
+ * already has a body and another addressee is never silently readdressed.
+ */
+export function prefillAction(
+  requested: string,
+  current: { toName: string; body: string },
+  max: number,
+): PrefillAction {
+  const name = clampChars(squash(requested), max).trim();
+  const now = squash(current.toName);
+  if (!name || name === now) return { kind: "none" };
+  if (now && tidyBody(current.body)) return { kind: "ask", toName: name };
+  return { kind: "set", toName: name, clearTitle: now !== "" };
+}
+
+// ---------------------------------------------------------------------------
 // Draft (localStorage). `contact` is deliberately never stored.
 // ---------------------------------------------------------------------------
 

@@ -211,9 +211,9 @@ export const TUNNEL_MOBILE: TunnelProfile = {
   fillerTex: { w: 192, h: 154 },
   fillerTextures: 2,
   dust: 110,
-  letterScale: 0.82,
+  letterScale: 0.66,
   anisotropy: 2,
-  ring: [0.22, 0.8],
+  ring: [0.26, 0.92],
 };
 
 export function tunnelBudgetBytes(p: TunnelProfile): number {
@@ -232,7 +232,7 @@ export const TUNNEL = {
   /** Letters stay this far behind the camera before they recycle to the far end. */
   behind: 1.2,
   /** Opacity ramps in from `near[0]` to `near[1]` world units in front of the camera. */
-  near: [0.45, 1.5] as const,
+  near: [0.7, 2.1] as const,
   /** Fraction of the visible depth where far letters start to appear out of the fog. */
   farFadeFrom: 0.55,
   /** Travel easing (1/s) and the fastest the camera may fly (units/s). */

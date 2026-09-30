@@ -4,7 +4,7 @@ import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { COPY } from "@/lib/config";
 import { searchPayload, shareCopy, shareNative, trackShare, whatsappUrl, xUrl, type ShareTarget } from "@/lib/share/links";
 import { LinkIcon, ShareIcon, WhatsAppIcon, XLogoIcon } from "./icons";
-import { MENU_ICON, MENU_ITEM, PILL, SharePopover, ShareToast, useCanNativeShare, useFlash } from "./SharePopover";
+import { PILL, SHARE_ITEM, SharePopover, ShareToast, TILE, TILE_ICON, useCanNativeShare, useFlash } from "./SharePopover";
 
 const T = {
   whatsapp: "واتساب",
@@ -52,6 +52,7 @@ export function ShareSearch({ q, count, className = "" }: { q: string; count: nu
     else window.prompt(T.copyPrompt, payload.url);
   };
 
+  const item = { [SHARE_ITEM]: "" };
   return (
     <>
       <button
@@ -70,41 +71,36 @@ export function ShareSearch({ q, count, className = "" }: { q: string; count: nu
         {note ?? ""}
       </span>
 
-      <SharePopover open={open} anchorRef={triggerRef} onClose={close} id={panelId} label={COPY.shareSearch}>
-        <a
-          data-share-item
-          className={MENU_ITEM}
-          href={whatsappUrl(payload)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={linkAction("whatsapp")}
-        >
-          <span className={MENU_ICON}>
-            <WhatsAppIcon size={19} className="text-[#1c9e50]" />
-          </span>
-          {T.whatsapp}
-          <span className="visually-hidden">{T.newTab}</span>
-        </a>
-        <a
-          data-share-item
-          className={MENU_ITEM}
-          href={xUrl(payload)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={linkAction("x")}
-        >
-          <span className={MENU_ICON}>
-            <XLogoIcon size={16} className="text-ink" />
-          </span>
-          {T.x}
-          <span className="visually-hidden">{T.newTab}</span>
-        </a>
-        <button type="button" data-share-item className={MENU_ITEM} onClick={copy}>
-          <span className={MENU_ICON}>
-            <LinkIcon size={18} />
-          </span>
-          {T.copy}
-        </button>
+      <SharePopover open={open} anchorRef={triggerRef} onClose={close} id={panelId} label={COPY.shareSearch} subtitle={q.trim()}>
+        <div className="flex items-start gap-1">
+          <a
+            {...item}
+            className={TILE}
+            href={whatsappUrl(payload)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={linkAction("whatsapp")}
+          >
+            <span className={`${TILE_ICON} bg-[#e4f5ea] text-[#1c9e50]`}>
+              <WhatsAppIcon size={22} />
+            </span>
+            {T.whatsapp}
+            <span className="visually-hidden">{T.newTab}</span>
+          </a>
+          <a {...item} className={TILE} href={xUrl(payload)} target="_blank" rel="noopener noreferrer" onClick={linkAction("x")}>
+            <span className={`${TILE_ICON} bg-[#efe9ed] text-ink`}>
+              <XLogoIcon size={18} />
+            </span>
+            {T.x}
+            <span className="visually-hidden">{T.newTab}</span>
+          </a>
+          <button type="button" {...item} className={TILE} onClick={copy}>
+            <span className={`${TILE_ICON} bg-plum-50 text-plum`}>
+              <LinkIcon size={20} />
+            </span>
+            {T.copy}
+          </button>
+        </div>
       </SharePopover>
 
       <ShareToast message={note} />

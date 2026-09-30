@@ -68,7 +68,7 @@ describe("resolveSlot", () => {
   ] as const) {
     it(`keeps near letters out of the calm zone (${name})`, () => {
       const view = viewFor(aspect, profile);
-      const slots = generateSlots(profile.total, mulberry32(11), profile.spread);
+      const slots = generateSlots(profile.maxReal, mulberry32(11), profile.spread);
       for (const raw of slots) {
         const r = resolveSlot(raw, view);
         const { u, v, dist } = project(r, view);

@@ -8,6 +8,7 @@ import {
   useState,
   useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -16,18 +17,16 @@ import { canNativeShare } from "@/lib/share/links";
 import { CloseIcon } from "./icons";
 
 // Shared building blocks for ShareMenu / ShareSearch: the popover (≥640px) /
-// bottom sheet (mobile), a toast, and small hooks.
+// bottom sheet (phones), a toast, and small hooks.
 
-/** White pill button: plum text, line border, ≥44px tall. */
+/** Quiet outlined button: plum text, line border, ≥44px tall (search share trigger). */
 export const PILL =
-  "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border-[1.5px] border-line bg-white px-4 py-2 text-[0.95rem] leading-tight font-bold whitespace-nowrap text-plum transition-[border-color,background-color,transform] duration-200 hover:border-plum-200 hover:bg-plum-50 active:scale-[0.97] disabled:cursor-progress disabled:opacity-75";
+  "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border-[1.5px] border-line bg-white/80 px-4 py-2 text-[0.95rem] leading-tight font-bold whitespace-nowrap text-plum transition-[border-color,background-color,transform] duration-200 hover:border-plum-200 hover:bg-white active:scale-[0.97] disabled:cursor-progress disabled:opacity-75";
 
-/** Row inside the popover / sheet. Tagged with data-share-item for focus + arrow keys. */
-export const MENU_ITEM =
-  "flex min-h-12 w-full items-center gap-3 rounded-2xl px-3 text-start text-base font-bold text-plum transition-colors duration-150 hover:bg-plum-50 focus-visible:bg-plum-50 disabled:cursor-progress disabled:opacity-75";
-
-/** Round icon holder at the start of a menu row. */
-export const MENU_ICON = "grid size-9 shrink-0 place-items-center rounded-full bg-plum-50";
+/** Round share-target tile (icon over a short label), laid out in a row. */
+export const TILE =
+  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1.5 rounded-2xl px-1 pt-1.5 pb-2 text-[0.8rem] leading-tight font-bold text-plum transition-colors duration-150 hover:bg-plum-50/70 focus-visible:bg-plum-50/70";
+export const TILE_ICON = "grid size-12 place-items-center rounded-full";
 
 const noopSubscribe = () => () => {};
 
@@ -54,6 +53,8 @@ export function useFlash(ms: number): [string | null, (msg: string | null) => vo
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 const FOCUSABLE = "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])";
+/** Items that take part in initial focus + arrow-key navigation. */
+export const SHARE_ITEM = "data-share-item";
 
 export interface SharePopoverProps {
   open: boolean;
@@ -61,20 +62,24 @@ export interface SharePopoverProps {
   /** restoreFocus: move focus back to the trigger (Esc, backdrop, after an action). */
   onClose: (opts: { restoreFocus: boolean }) => void;
   id: string;
+  /** Dialog name, shown as the sheet's title. */
   label: string;
+  /** Small line under the sheet title (e.g. «إلى: أستاذة نورة»). */
+  subtitle?: string;
   children: ReactNode;
 }
 
 /**
  * Popover anchored to the trigger on ≥640px, bottom sheet on phones. Rendered in
- * a portal with fixed positioning so tilted / overflow-hidden cards can't clip it.
+ * a portal with fixed positioning so tilted / overflow-hidden cards can't clip it,
+ * and above the letter view (z-90) and the immersive overlay (z-80).
  */
 export function SharePopover(props: SharePopoverProps) {
   if (!props.open) return null;
   return createPortal(<Panel {...props} />, document.body);
 }
 
-function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverProps, "open">) {
+function Panel({ anchorRef, onClose, id, label, subtitle, children }: Omit<SharePopoverProps, "open">) {
   const [sheet] = useState(() => !window.matchMedia("(min-width: 640px)").matches);
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -120,10 +125,10 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
     if (!reducedMotion()) {
       if (sheet) {
         panel.animate([{ transform: "translateY(100%)" }, { transform: "translateY(0)" }], {
-          duration: 300,
+          duration: 320,
           easing: "cubic-bezier(0.22, 1, 0.36, 1)",
         });
-        backdropRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
+        backdropRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
       } else {
         panel.animate(
           [
@@ -134,7 +139,7 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
         );
       }
     }
-    panel.querySelector<HTMLElement>("[data-share-item]:not([disabled])")?.focus({ preventScroll: true });
+    panel.querySelector<HTMLElement>(`[${SHARE_ITEM}]:not([disabled])`)?.focus({ preventScroll: true });
 
     const root = document.documentElement;
     const prevOverflow = root.style.overflow;
@@ -154,7 +159,10 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
         if (!items.length) return;
         const first = items[0];
         const last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
+        if (!panel.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -185,20 +193,54 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
     };
   }, [sheet, anchorRef]);
 
-  // Arrow keys move between rows.
+  // Arrow keys move between items (tiles run in a row, so ←/→ work too).
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
-    const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-share-item]:not([disabled])")];
+    const keys = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>(`[${SHARE_ITEM}]:not([disabled])`)];
     if (!items.length) return;
     e.preventDefault();
     const i = items.indexOf(document.activeElement as HTMLElement);
+    // RTL: ← moves forward.
+    const fwd = e.key === "ArrowDown" || e.key === "ArrowLeft";
     const next =
       e.key === "Home"
         ? 0
         : e.key === "End"
           ? items.length - 1
-          : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+          : (i + (fwd ? 1 : -1) + items.length) % items.length;
     items[next].focus();
+  };
+
+  // Swipe the sheet down (from its header) to dismiss it.
+  const drag = useRef<{ y: number; t: number; dy: number } | null>(null);
+  const onDragStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "mouse" || (e.target instanceof Element && e.target.closest("button"))) return;
+    drag.current = { y: e.clientY, t: performance.now(), dy: 0 };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onDragMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    const panel = panelRef.current;
+    if (!d || !panel) return;
+    d.dy = Math.max(0, e.clientY - d.y);
+    panel.style.transform = `translateY(${d.dy}px)`;
+  };
+  const onDragEnd = () => {
+    const d = drag.current;
+    const panel = panelRef.current;
+    drag.current = null;
+    if (!d || !panel) return;
+    const speed = d.dy / Math.max(1, performance.now() - d.t);
+    if (d.dy > 90 || speed > 0.6) {
+      onCloseRef.current({ restoreFocus: true });
+      return;
+    }
+    panel.style.transition = "transform 200ms cubic-bezier(0.22, 1, 0.36, 1)";
+    panel.style.transform = "";
+    setTimeout(() => {
+      if (panelRef.current) panelRef.current.style.transition = "";
+    }, 220);
   };
 
   // Portal content still bubbles through React to the card; keep clicks here.
@@ -206,11 +248,11 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
 
   if (sheet) {
     return (
-      <div ref={rootRef} className="fixed inset-0 z-[90]" onClick={stop} onKeyDown={onKeyDown}>
+      <div ref={rootRef} className="fixed inset-0 z-[100]" onClick={stop} onKeyDown={onKeyDown}>
         <div
           ref={backdropRef}
           aria-hidden="true"
-          className="absolute inset-0 bg-plum-950/45"
+          className="absolute inset-0 bg-plum-950/40"
           onClick={() => onCloseRef.current({ restoreFocus: true })}
         />
         <div
@@ -219,22 +261,33 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
           role="dialog"
           aria-modal="true"
           aria-label={label}
-          className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-[28px] bg-white px-4 pt-2.5 shadow-lift"
-          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+          className="absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto overscroll-contain rounded-t-[26px] bg-paper px-4 shadow-lift"
+          style={{ paddingBottom: "max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem))" }}
         >
-          <div aria-hidden="true" className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-line-strong" />
-          <div className="mb-1 flex items-center justify-between gap-3 ps-1">
-            <p className="text-base font-bold text-plum">{label}</p>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="إغلاق"
-              onClick={() => onCloseRef.current({ restoreFocus: true })}
-            >
-              <CloseIcon size={18} />
-            </button>
+          <div
+            className="-mx-4 cursor-grab touch-none px-4 pt-2.5 pb-1 select-none"
+            onPointerDown={onDragStart}
+            onPointerMove={onDragMove}
+            onPointerUp={onDragEnd}
+            onPointerCancel={onDragEnd}
+          >
+            <div aria-hidden="true" className="mx-auto mb-3 h-1.5 w-11 rounded-full bg-line-strong" />
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 ps-1">
+                <p className="text-lg leading-snug font-bold text-plum">{label}</p>
+                {subtitle && <p className="truncate text-sm text-ink-soft">{subtitle}</p>}
+              </div>
+              <button
+                type="button"
+                className="icon-btn -me-1 shrink-0 border-transparent bg-transparent"
+                aria-label="إغلاق"
+                onClick={() => onCloseRef.current({ restoreFocus: true })}
+              >
+                <CloseIcon size={18} />
+              </button>
+            </div>
           </div>
-          <div className="flex flex-col gap-0.5 pb-1">{children}</div>
+          <div className="pt-3">{children}</div>
         </div>
       </div>
     );
@@ -246,7 +299,7 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
       id={id}
       role="dialog"
       aria-label={label}
-      className="fixed z-[90] flex w-64 flex-col gap-0.5 rounded-3xl border border-line bg-white p-2 shadow-lift"
+      className="fixed z-[100] w-[21rem] max-w-[calc(100vw-1rem)] rounded-[22px] border border-line bg-paper p-3 shadow-lift"
       style={{ top: 0, left: 0, visibility: "hidden" }}
       onClick={stop}
       onKeyDown={onKeyDown}
@@ -256,16 +309,16 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
   );
 }
 
-/** Small confirmation pill at the bottom of the viewport. */
+/** Small confirmation note near the bottom of the viewport (clears a sticky bottom bar). */
 export function ShareToast({ message }: { message: string | null }) {
   if (!message) return null;
   return createPortal(
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[95] flex justify-center px-4"
-      style={{ paddingBottom: "max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))" }}
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-[105] flex justify-center px-4"
+      style={{ paddingBottom: "calc(max(0.75rem, env(safe-area-inset-bottom)) + 5.5rem)" }}
     >
-      <p className="rounded-full bg-plum px-5 py-3 text-center text-sm font-bold text-white shadow-lift">{message}</p>
+      <p className="rounded-2xl bg-plum-950 px-5 py-3 text-center text-sm font-bold text-white shadow-lift">{message}</p>
     </div>,
     document.body,
   );

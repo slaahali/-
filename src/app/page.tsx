@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { CampaignPage } from "@/components/CampaignPage";
 import { COPY } from "@/lib/config";
-import { getInitialWall } from "@/lib/data";
+import { getInitialWall, getSceneLetters } from "@/lib/data";
 import { safeSearchQuery } from "@/lib/search-query";
 
 export async function generateMetadata({ searchParams }: PageProps<"/">): Promise<Metadata> {
@@ -34,16 +34,17 @@ export async function generateMetadata({ searchParams }: PageProps<"/">): Promis
 
 export default async function Home({ searchParams }: PageProps<"/">) {
   const q = safeSearchQuery((await searchParams).q);
-  const [wall, results] = await Promise.all([
+  const [wall, results, heroLetters] = await Promise.all([
     getInitialWall(),
     q ? getInitialWall(q) : Promise.resolve(null),
+    getSceneLetters(),
   ]);
 
   return (
     <CampaignPage
       initial={results ?? wall}
       initialQuery={q || undefined}
-      heroLetters={wall.items}
+      heroLetters={heroLetters}
       total={wall.total}
     />
   );

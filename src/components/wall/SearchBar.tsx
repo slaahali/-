@@ -29,6 +29,10 @@ export function SearchBar({
     inputRef.current?.focus();
   };
 
+  // Only reserve room for the spinner / clear button while they are shown, so
+  // the placeholder fits on a 360px phone.
+  const endPad = value ? (busy ? "pe-[5.25rem]" : "pe-14") : busy ? "pe-11" : "pe-4";
+
   return (
     <form
       role="search"
@@ -45,8 +49,8 @@ export function SearchBar({
         {LABEL}
       </label>
       <div className="group relative">
-        <span className="pointer-events-none absolute inset-y-0 start-5 flex items-center text-plum/60 transition-colors group-focus-within:text-orange">
-          <SearchGlyph size={24} />
+        <span className="pointer-events-none absolute inset-y-0 start-4 flex items-center text-plum/55 transition-colors group-focus-within:text-orange">
+          <SearchGlyph size={22} />
         </span>
         <input
           ref={inputRef}
@@ -68,9 +72,9 @@ export function SearchBar({
               clear();
             }
           }}
-          className="h-15 w-full rounded-full border-2 border-plum-200 bg-white ps-14 pe-24 text-[1.125rem] font-medium text-ink shadow-soft transition-[border-color,box-shadow] duration-200 outline-none placeholder:font-normal placeholder:text-ink-mute hover:border-plum/40 focus:border-plum focus:shadow-[0_0_0_5px_rgb(105_29_78/0.12),0_18px_40px_-20px_rgb(105_29_78/0.45)] focus-visible:outline-none sm:h-16 sm:text-[1.2rem] [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
+          className={`h-14 w-full rounded-[14px] border-[1.5px] border-line-strong bg-paper ps-12 ${endPad} text-[1.0625rem] font-medium text-ink shadow-[0_1px_1px_rgb(61_15_45/0.06),0_10px_24px_-18px_rgb(105_29_78/0.35)] transition-[border-color,box-shadow] duration-200 outline-none placeholder:font-normal placeholder:text-ink-mute hover:border-plum-200 focus:border-plum focus:shadow-[0_0_0_4px_rgb(105_29_78/0.1)] focus-visible:outline-none sm:h-15 sm:text-[1.15rem] [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none`}
         />
-        <div className="absolute inset-y-0 end-2 flex items-center gap-1">
+        <div className="absolute inset-y-0 end-1.5 flex items-center gap-1">
           {busy && <Spinner size={20} className="text-orange" />}
           {value && (
             <button

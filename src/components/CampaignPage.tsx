@@ -6,8 +6,10 @@ import { Hero } from "@/components/hero/Hero";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
 import { LetterModal } from "@/components/letter/LetterModal";
+import { SoundToggle } from "@/components/ui/SoundToggle";
 import { WallSection } from "@/components/wall/WallSection";
 import { WriteSection } from "@/components/write/WriteSection";
+import { preloadSounds } from "@/lib/sound";
 import type { ListResult, PublicMessage } from "@/lib/types";
 
 export interface CampaignPageProps {
@@ -55,6 +57,20 @@ export function CampaignPage({
     return () => cancelAnimationFrame(raf);
   }, [initialQuery]);
 
+  // Decode the sound clips on the first interaction, so the first letter
+  // opens with its sound instead of a fetch.
+  useEffect(() => {
+    const events = ["pointerdown", "keydown"] as const;
+    const warm = () => {
+      for (const e of events) window.removeEventListener(e, warm, true);
+      preloadSounds();
+    };
+    for (const e of events) window.addEventListener(e, warm, { capture: true, passive: true });
+    return () => {
+      for (const e of events) window.removeEventListener(e, warm, true);
+    };
+  }, []);
+
   return (
     <LettersProvider initialTotal={initialTotal} initialMessages={seed} initialOpen={initialOpen}>
       <a
@@ -70,6 +86,7 @@ export function CampaignPage({
         <WallSection initial={initial} initialQuery={initialQuery} />
       </main>
       <Footer />
+      <SoundToggle className="fixed end-4 bottom-[max(1rem,calc(env(safe-area-inset-bottom)+0.5rem))] z-30 bg-white/90 shadow-soft backdrop-blur-sm sm:end-6 sm:bottom-6" />
       <LetterModal />
     </LettersProvider>
   );

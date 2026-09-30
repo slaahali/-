@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { COPY } from "@/lib/config";
+import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { cardStyle } from "@/lib/assets";
+import { toLine } from "@/lib/format";
+import { envelopeColors } from "@/lib/og/art";
 import {
   letterPayload,
   shareCopy,
@@ -11,22 +13,16 @@ import {
   xUrl,
   type ShareTarget,
 } from "@/lib/share/links";
-import { prepareStoryCard, shareOrDownloadStoryCard } from "@/lib/share/storyCard";
+import { shareOrDownloadStoryCard, storyCardBlob } from "@/lib/share/storyCard";
 import type { PublicMessage } from "@/lib/types";
 import { LinkIcon, ShareIcon, SpinnerIcon, StoryIcon, SystemShareIcon, WhatsAppIcon, XLogoIcon } from "./icons";
-import {
-  MENU_ICON,
-  MENU_ITEM,
-  PILL,
-  SharePopover,
-  ShareToast,
-  useCanNativeShare,
-  useFlash,
-} from "./SharePopover";
+import { SHARE_ITEM, SharePopover, ShareToast, TILE, TILE_ICON, useCanNativeShare, useFlash } from "./SharePopover";
 
 const T = {
-  menuLabel: "مشاركة الرسالة",
-  nativeItem: "مشاركة عبر…",
+  /** Trigger name: contains «مشاركة» so a visible "مشاركة" label stays part of it. */
+  trigger: "مشاركة الرسالة",
+  menuLabel: "شارك الرسالة",
+  native: "المزيد",
   whatsapp: "واتساب",
   x: "X",
   copy: "نسخ الرابط",
@@ -34,16 +30,15 @@ const T = {
   copiedLive: "تم نسخ الرابط ✓",
   copyPrompt: "انسخ الرابط:",
   story: "صورة للستوري",
-  storyBusy: "جاري التجهيز…",
+  storySub: "جاهزة لإنستقرام وسناب",
+  storyBusy: "نجهّز الصورة…",
   storySaved: "نزّلنا الصورة ✓ شاركها في الستوري",
   storyFailed: "ما قدرنا نجهّز الصورة، حاول مرة ثانية 🙏",
   nativeFailed: "ما انفتحت المشاركة، جرّب نسخ الرابط",
   newTab: " (تفتح في نافذة جديدة)",
 };
 
-const WHATSAPP_GREEN = "text-[#1c9e50]";
-
-/** Shared behaviour for both layouts: copy, native share, story image + their feedback. */
+/** Shared behaviour for every layout: copy, native share, story image + their feedback. */
 function useLetterShare(message: PublicMessage) {
   const payload = useMemo(() => letterPayload(message), [message]);
   const target = useMemo<ShareTarget>(() => ({ kind: "letter", id: message.id }), [message.id]);
@@ -81,10 +76,171 @@ function useLetterShare(message: PublicMessage) {
     }
   }, [message, target, flashNote]);
 
-  const warmStory = useCallback(() => prepareStoryCard(message), [message]);
-
-  return { payload, target, copied, note, busy, copy, native, story, warmStory };
+  return { payload, target, copied, note, busy, copy, native, story };
 }
+
+/**
+ * Renders the story image in the background once `active` (after `delay` ms,
+ * when the browser is idle) and returns an object URL for a thumbnail. Having
+ * it ready also lets a tap on «صورة للستوري» open the OS share sheet while the
+ * tap still counts as a user gesture.
+ */
+function useStoryThumb(message: PublicMessage, active: boolean, delay: number): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const render = useEffectEvent(() => storyCardBlob(message));
+  const key = `${message.id}:${message.variant}:${message.inMemory ? 1 : 0}`;
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    let obj: string | null = null;
+    let idle: number | undefined;
+    const run = () =>
+      render()
+        .then((b) => {
+          if (!alive) return;
+          obj = URL.createObjectURL(b);
+          setUrl(obj);
+        })
+        .catch(() => {});
+    const t = setTimeout(() => {
+      if (typeof window.requestIdleCallback === "function") idle = window.requestIdleCallback(run, { timeout: 1500 });
+      else run();
+    }, delay);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+      if (idle !== undefined) window.cancelIdleCallback?.(idle);
+      if (obj) URL.revokeObjectURL(obj);
+      setUrl(null);
+    };
+  }, [key, active, delay]);
+  return url;
+}
+
+// --- layout pieces --------------------------------------------------------------
+
+type Share = ReturnType<typeof useLetterShare>;
+
+/** Everything a letter can be shared as: the story image (with a thumbnail) + round target tiles. */
+function ShareOptions({
+  message,
+  s,
+  thumb,
+  canNative,
+  after,
+}: {
+  message: PublicMessage;
+  s: Share;
+  thumb: string | null;
+  canNative: boolean;
+  /** Runs after an action (the sheet closes itself here). */
+  after?: { now: () => void; later: () => void };
+}) {
+  const env = envelopeColors(cardStyle(message));
+  const link = (channel: "whatsapp" | "x") => () => {
+    trackShare(s.target, channel);
+    after?.later();
+  };
+  return (
+    <div className="flex flex-col gap-2.5">
+      <button
+        type="button"
+        {...{ [SHARE_ITEM]: "" }}
+        className="group flex min-h-11 w-full items-center gap-3.5 rounded-[18px] bg-cream p-2 pe-3 text-start transition-colors duration-150 hover:bg-cream-2 focus-visible:bg-cream-2 disabled:cursor-progress"
+        onClick={async () => {
+          await s.story();
+          after?.now();
+        }}
+        disabled={s.busy}
+        aria-busy={s.busy}
+      >
+        <span
+          aria-hidden="true"
+          className="relative h-[76px] w-[43px] shrink-0 -rotate-3 overflow-hidden rounded-[5px] shadow-soft ring-1 ring-black/5"
+          style={{ backgroundColor: env.base }}
+        >
+          {thumb ? (
+            // A blob: URL of the image we just drew — nothing for next/image to optimise.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={thumb} alt="" className="size-full object-cover" />
+          ) : (
+            <span className="absolute inset-x-[5px] top-[9px] bottom-[26px] rounded-[2px] bg-paper/90" />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base leading-snug font-bold text-plum">{s.busy ? T.storyBusy : T.story}</span>
+          <span className="block text-sm leading-snug text-ink-soft">{T.storySub}</span>
+        </span>
+        <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-white text-orange-700">
+          {s.busy ? <SpinnerIcon size={18} /> : <StoryIcon size={19} />}
+        </span>
+      </button>
+
+      <div className="flex items-start gap-1">
+        <a
+          {...{ [SHARE_ITEM]: "" }}
+          className={TILE}
+          href={whatsappUrl(s.payload)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={link("whatsapp")}
+        >
+          <span className={`${TILE_ICON} bg-[#e4f5ea] text-[#1c9e50]`}>
+            <WhatsAppIcon size={22} />
+          </span>
+          {T.whatsapp}
+          <span className="visually-hidden">{T.newTab}</span>
+        </a>
+        <a
+          {...{ [SHARE_ITEM]: "" }}
+          className={TILE}
+          href={xUrl(s.payload)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={link("x")}
+        >
+          <span className={`${TILE_ICON} bg-[#efe9ed] text-ink`}>
+            <XLogoIcon size={18} />
+          </span>
+          {T.x}
+          <span className="visually-hidden">{T.newTab}</span>
+        </a>
+        <button
+          type="button"
+          {...{ [SHARE_ITEM]: "" }}
+          className={TILE}
+          onClick={() => {
+            after?.now();
+            void s.copy();
+          }}
+        >
+          <span className={`${TILE_ICON} bg-plum-50 text-plum`}>
+            <LinkIcon size={20} />
+          </span>
+          {s.copied ?? T.copy}
+        </button>
+        {canNative && (
+          <button
+            type="button"
+            {...{ [SHARE_ITEM]: "" }}
+            className={TILE}
+            onClick={() => {
+              after?.now();
+              void s.native();
+            }}
+          >
+            <span className={`${TILE_ICON} bg-orange-50 text-orange-700`}>
+              <SystemShareIcon size={20} />
+            </span>
+            {T.native}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- public components ------------------------------------------------------------
 
 export function ShareMenu({
   message,
@@ -92,12 +248,12 @@ export function ShareMenu({
   className = "",
 }: {
   message: PublicMessage;
-  /** "full": row of labelled buttons (success panel, letter view). "compact": one icon button that opens a popover/bottom sheet (cards). */
+  /** "full": the options inline (success panel, letter view). "compact": one icon button that opens a popover/bottom sheet (cards). */
   mode?: "full" | "compact";
   className?: string;
 }) {
   return mode === "compact" ? (
-    <CompactShare message={message} className={className} />
+    <ShareSheetButton message={message} className={`icon-btn ${className}`} />
   ) : (
     <FullShare message={message} className={className} />
   );
@@ -106,44 +262,15 @@ export function ShareMenu({
 function FullShare({ message, className }: { message: PublicMessage; className: string }) {
   const s = useLetterShare(message);
   const canNative = useCanNativeShare();
-
+  const thumb = useStoryThumb(message, true, 700);
   return (
-    <div className={`flex flex-wrap items-center gap-2 ${className}`}>
-      {canNative && (
-        <button type="button" className={PILL} onClick={s.native}>
-          <SystemShareIcon size={18} />
-          {COPY.share}
-        </button>
-      )}
-      <LinkPill href={whatsappUrl(s.payload)} onClick={() => trackShare(s.target, "whatsapp")}>
-        <WhatsAppIcon size={19} className={WHATSAPP_GREEN} />
-        {T.whatsapp}
-      </LinkPill>
-      <LinkPill href={xUrl(s.payload)} onClick={() => trackShare(s.target, "x")}>
-        <XLogoIcon size={16} className="text-ink" />
-        {T.x}
-      </LinkPill>
-      <button type="button" className={PILL} onClick={s.copy}>
-        <LinkIcon size={18} />
-        {s.copied ?? T.copy}
-      </button>
-      <button
-        type="button"
-        className={PILL}
-        onClick={s.story}
-        onPointerEnter={s.warmStory}
-        onFocus={s.warmStory}
-        disabled={s.busy}
-        aria-busy={s.busy}
-      >
-        {s.busy ? <SpinnerIcon size={18} /> : <StoryIcon size={18} />}
-        {s.busy ? T.storyBusy : T.story}
-      </button>
+    <div className={className}>
+      <ShareOptions message={message} s={s} thumb={thumb} canNative={canNative} />
       <span className="visually-hidden" aria-live="polite">
         {s.note ?? ""}
       </span>
       {s.note && s.note !== T.copiedLive && (
-        <p aria-hidden="true" className="basis-full text-sm font-semibold text-ink-soft">
+        <p aria-hidden="true" className="mt-2 text-sm font-bold text-ink-soft">
           {s.note}
         </p>
       )}
@@ -151,130 +278,79 @@ function FullShare({ message, className }: { message: PublicMessage; className: 
   );
 }
 
-function LinkPill({ href, onClick, children }: { href: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <a className={PILL} href={href} target="_blank" rel="noopener noreferrer" onClick={onClick}>
-      {children}
-      <span className="visually-hidden">{T.newTab}</span>
-    </a>
-  );
-}
-
-function CompactShare({ message, className }: { message: PublicMessage; className: string }) {
+/**
+ * A button that opens the letter's share sheet (bottom sheet on phones, popover
+ * from 640px): story image, WhatsApp, X, copy link and the OS share sheet.
+ *
+ * Use it wherever a "مشاركة" action lives outside ShareMenu, e.g. the letter
+ * view's sticky bottom bar:
+ *
+ *   <ShareSheetButton message={m} className="btn btn-ghost">
+ *     <ShareIcon size={18} /> مشاركة
+ *   </ShareSheetButton>
+ *
+ * Without children it renders the share glyph and labels itself «مشاركة الرسالة»
+ * (pass `className="icon-btn"` for the round icon button). With icon-only
+ * children, pass `ariaLabel`. The sheet sits above the letter view (z-100),
+ * traps focus, closes on Esc / backdrop / swipe-down and returns focus here.
+ */
+export function ShareSheetButton({
+  message,
+  className = "",
+  children,
+  ariaLabel,
+}: {
+  message: PublicMessage;
+  className?: string;
+  children?: ReactNode;
+  ariaLabel?: string;
+}) {
   const s = useLetterShare(message);
   const canNative = useCanNativeShare();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const thumb = useStoryThumb(message, open, 300);
 
   const close = useCallback(({ restoreFocus }: { restoreFocus: boolean }) => {
     setOpen(false);
     if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // Render the story image in the background once the menu is open, so a tap on
-  // "صورة للستوري" can open the share sheet while it still counts as a gesture.
-  const { warmStory } = s;
-  useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(warmStory, 350);
-    return () => clearTimeout(t);
-  }, [open, warmStory]);
+  const after = useMemo(
+    () => ({
+      now: () => close({ restoreFocus: true }),
+      // Let a link open before the menu unmounts.
+      later: () => setTimeout(() => close({ restoreFocus: true }), 0),
+    }),
+    [close],
+  );
 
-  const linkAction = (channel: "whatsapp" | "x") => () => {
-    trackShare(s.target, channel);
-    // Let the link open before the menu unmounts.
-    setTimeout(() => close({ restoreFocus: true }), 0);
-  };
-
+  const label = ariaLabel ?? (children ? undefined : T.trigger);
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
-        className={`icon-btn ${className}`}
-        aria-label={T.menuLabel}
-        title={T.menuLabel}
+        className={className}
+        aria-label={label}
+        title={children ? undefined : T.trigger}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        <ShareIcon size={19} />
+        {children ?? <ShareIcon size={19} />}
       </button>
       <span className="visually-hidden" aria-live="polite">
         {s.note ?? ""}
       </span>
 
-      <SharePopover open={open} anchorRef={triggerRef} onClose={close} id={panelId} label={T.menuLabel}>
-        {canNative && (
-          <button
-            type="button"
-            data-share-item
-            className={MENU_ITEM}
-            onClick={() => {
-              close({ restoreFocus: true });
-              void s.native();
-            }}
-          >
-            <span className={MENU_ICON}>
-              <SystemShareIcon size={18} />
-            </span>
-            {T.nativeItem}
-          </button>
-        )}
-        <MenuLink href={whatsappUrl(s.payload)} onClick={linkAction("whatsapp")}>
-          <span className={MENU_ICON}>
-            <WhatsAppIcon size={19} className={WHATSAPP_GREEN} />
-          </span>
-          {T.whatsapp}
-        </MenuLink>
-        <MenuLink href={xUrl(s.payload)} onClick={linkAction("x")}>
-          <span className={MENU_ICON}>
-            <XLogoIcon size={16} className="text-ink" />
-          </span>
-          {T.x}
-        </MenuLink>
-        <button
-          type="button"
-          data-share-item
-          className={MENU_ITEM}
-          onClick={() => {
-            close({ restoreFocus: true });
-            void s.copy();
-          }}
-        >
-          <span className={MENU_ICON}>
-            <LinkIcon size={18} />
-          </span>
-          {T.copy}
-        </button>
-        <button
-          type="button"
-          data-share-item
-          className={MENU_ITEM}
-          disabled={s.busy}
-          aria-busy={s.busy}
-          onClick={async () => {
-            await s.story();
-            close({ restoreFocus: true });
-          }}
-        >
-          <span className={MENU_ICON}>{s.busy ? <SpinnerIcon size={18} /> : <StoryIcon size={18} />}</span>
-          {s.busy ? T.storyBusy : T.story}
-        </button>
+      <SharePopover open={open} anchorRef={triggerRef} onClose={close} id={panelId} label={T.menuLabel} subtitle={toLine(message)}>
+        <ShareOptions message={message} s={s} thumb={thumb} canNative={canNative} after={after} />
       </SharePopover>
 
       <ShareToast message={s.note} />
     </>
-  );
-}
-
-function MenuLink({ href, onClick, children }: { href: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <a data-share-item className={MENU_ITEM} href={href} target="_blank" rel="noopener noreferrer" onClick={onClick}>
-      {children}
-      <span className="visually-hidden">{T.newTab}</span>
-    </a>
   );
 }

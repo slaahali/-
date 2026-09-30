@@ -7,16 +7,18 @@ import { LikeButton } from "@/components/ui/LikeButton";
 import { ReportButton } from "@/components/ui/ReportButton";
 import { cardStyle } from "@/lib/assets";
 import { COPY } from "@/lib/config";
-import { displayTo, fromName, timeAgo, toLine } from "@/lib/format";
+import { displayTo, fromName, toLine } from "@/lib/format";
+import { play } from "@/lib/sound";
 import type { PublicMessage } from "@/lib/types";
-import { SchoolGlyph } from "./glyphs";
-import { useHydrated } from "./hooks";
-import { looksLong, tiltFor } from "./wall-utils";
+import { PostageStamp } from "./PostageStamp";
+import { looksLong, postmarkDate, tiltFor } from "./wall-utils";
 import styles from "./wall.module.css";
 
 /**
- * One colourful letter on the wall. The whole card is a stretched button that
- * opens the letter view; like / share / report sit above it as separate buttons.
+ * One letter on the wall, drawn as a folded note in the writer's envelope
+ * colour: postage stamp + postmark, an address block, the first lines, the
+ * signature and a dog-eared corner. The name is a stretched button, so a tap
+ * anywhere opens the letter; like / share / ⋯ sit above it as their own buttons.
  */
 export function MessageCard({
   message: m,
@@ -25,19 +27,18 @@ export function MessageCard({
   leaving = false,
 }: {
   message: PublicMessage;
-  /** Position on the wall (drives the alternating tilt). */
+  /** Position on the wall (drives the hand-pinned tilt). */
   index?: number;
-  /** Just published by this visitor: glow + «جديدة» badge. */
+  /** Just published by this visitor: highlighted with a «جديدة» tag. */
   fresh?: boolean;
   /** No longer public: fades out before the wall drops it. */
   leaving?: boolean;
 }) {
   const { openLetter } = useLetters();
   const s = cardStyle(m);
-  const hydrated = useHydrated();
   const titleId = useId();
   const bodyRef = useRef<HTMLParagraphElement>(null);
-  const [clamped, setClamped] = useState(() => looksLong(m.body));
+  const [clamped, setClamped] = useState(() => looksLong(m.body, 6));
 
   // Only fade the text out when it is really cut off.
   useEffect(() => {
@@ -50,11 +51,13 @@ export function MessageCard({
 
   const name = displayTo(m);
   const line = toLine(m);
-  const prefix = line.endsWith(name)
-    ? line.slice(0, line.length - name.length).trim()
-    : COPY.labelTo;
+  // «إلى» / «إلى روح» on its own line, like the first line of an address.
+  const to = (line.endsWith(name) ? line.slice(0, line.length - name.length) : COPY.labelTo)
+    .replace(/[:：]\s*$/, "")
+    .trim();
   const memory = m.inMemory;
   const showFresh = fresh && !memory;
+  const date = postmarkDate(m.createdAt);
 
   const vars = {
     "--card-bg": s.bg,
@@ -74,47 +77,49 @@ export function MessageCard({
 
   return (
     <article aria-labelledby={titleId} className={cls} style={vars}>
-      <span aria-hidden="true" className={styles.deco} />
-      <span aria-hidden="true" className={styles.seal}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 20.4s-7.4-4.5-9.2-9.1C1.5 8 3.5 4.6 6.9 4.6c2 0 3.6 1.1 5.1 3 1.5-1.9 3.1-3 5.1-3 3.4 0 5.4 3.4 4.1 6.7-1.8 4.6-9.2 9.1-9.2 9.1Z" />
-        </svg>
+      <span aria-hidden="true" className={styles.paper}>
+        <span className={styles.sheet} />
+        <span className={styles.dogEar} />
       </span>
-      {showFresh && <span className={styles.freshBadge}>جديدة ✨</span>}
+      <PostageStamp message={m} />
+      {showFresh && <span className={styles.freshTag}>جديدة</span>}
 
-      <header className="flex flex-col gap-1 pe-11">
-        {memory && <span className={styles.memoryTag}>{COPY.memoryTag}</span>}
+      <header className={styles.address}>
         <h3 id={titleId}>
-          <button type="button" onClick={() => openLetter(m)} className={styles.open}>
-            <span className="block text-[0.8rem] font-semibold opacity-70">{prefix}</span>
-            <span className="block text-[1.3rem] leading-snug font-bold [overflow-wrap:anywhere]">
-              {name}
-            </span>
+          <button
+            type="button"
+            onClick={() => {
+              void play("open");
+              openLetter(m);
+            }}
+            className={styles.open}
+          >
+            <span className={styles.to}>{to}</span>
+            <span className={styles.name}>{name}</span>
           </button>
         </h3>
-        {m.school && (
-          <p className="flex items-start gap-1.5 text-[0.85rem] leading-snug opacity-75">
-            <SchoolGlyph className="mt-[0.2em] shrink-0" />
-            <span className="min-w-0 [overflow-wrap:anywhere]">{m.school}</span>
-          </p>
-        )}
+        {m.school && <p className={styles.school}>{m.school}</p>}
       </header>
+
+      <span aria-hidden="true" className={styles.crease} />
 
       <p ref={bodyRef} className={`${styles.body} ${clamped ? styles.clamped : ""}`}>
         {m.body}
       </p>
-      <span aria-hidden="true" className={styles.readMore}>
-        {COPY.readMore} <span>←</span>
-      </span>
 
-      <div className="flex items-end justify-between gap-3">
-        <p className={`font-hand min-w-0 text-[1.25rem] leading-tight ${styles.signature}`}>
-          — {fromName(m)}
-        </p>
-        <time dateTime={m.createdAt} className="shrink-0 pb-0.5 text-xs opacity-60">
-          {hydrated ? timeAgo(m.createdAt) : ""}
-        </time>
+      <div className={styles.signoff}>
+        {clamped && (
+          <span aria-hidden="true" className={styles.readMore}>
+            {COPY.readMore} <span>←</span>
+          </span>
+        )}
+        <p className={`font-hand ${styles.signature}`}>— {fromName(m)}</p>
       </div>
+      {date && (
+        <time dateTime={m.createdAt} className="visually-hidden">
+          {date.day} {date.month}
+        </time>
+      )}
 
       <div className={styles.actions}>
         <LikeButton message={m} size="sm" />
@@ -122,7 +127,7 @@ export function MessageCard({
           <ShareMenu
             message={m}
             mode="compact"
-            className="border-transparent bg-white/55 hover:bg-white"
+            className="border-transparent bg-transparent text-[color:var(--card-ink)] opacity-75 hover:border-transparent hover:bg-white/60 hover:opacity-100"
           />
           <ReportButton message={m} compact />
         </div>
@@ -134,15 +139,14 @@ export function MessageCard({
 export function SkeletonCard({ lines = 5 }: { lines?: number }) {
   return (
     <div aria-hidden="true" className={styles.skeleton}>
-      <span className={styles.bar} style={{ width: "22%", height: "0.6rem" }} />
-      <span className={styles.bar} style={{ width: "58%", height: "1.15rem" }} />
-      <span className={styles.bar} style={{ width: "40%", height: "0.6rem" }} />
-      <span className="h-1" />
+      <span className={styles.bar} style={{ width: "14%", height: "0.6rem" }} />
+      <span className={styles.bar} style={{ width: "52%", height: "1.2rem" }} />
+      <span className={styles.bar} style={{ width: "34%", height: "0.6rem" }} />
+      <span className="h-2" />
       {Array.from({ length: lines }, (_, i) => (
-        <span key={i} className={styles.bar} style={{ width: i === lines - 1 ? "62%" : "100%" }} />
+        <span key={i} className={styles.bar} style={{ width: i === lines - 1 ? "58%" : "100%" }} />
       ))}
-      <span className="h-1" />
-      <span className={styles.bar} style={{ width: "34%", height: "1rem" }} />
+      <span className={styles.bar} style={{ width: "26%", height: "1rem", marginInlineStart: "auto" }} />
     </div>
   );
 }

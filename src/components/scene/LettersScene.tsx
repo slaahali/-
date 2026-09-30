@@ -2,7 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import type { SceneLetter } from "@/lib/events";
+import { play } from "@/lib/sound";
 import { LettersEngine } from "./engine";
+import { LABEL_PILL_CLASS } from "./label-style";
 
 export type LettersSceneProps = {
   /** Real letters to float (≤ 40); the scene pads the field with blank ones. */
@@ -17,9 +19,12 @@ export type LettersSceneProps = {
 const POSITIONED = /(^|\s)(absolute|fixed|relative|sticky)(\s|$)/;
 
 /**
- * Floating folded letters (three.js). Decorative: the canvas is aria-hidden and
- * the wall below is the accessible way to reach every letter. Also flies in
- * letters announced with NEW_LETTER_EVENT. Renders an empty box without WebGL.
+ * Floating folded letters (three.js): the newest letters, padded with blank
+ * ones only while there are few. Decorative: the canvas is aria-hidden and the
+ * wall below is the accessible way to reach every letter. Also flies in letters
+ * announced with NEW_LETTER_EVENT and lets go of LETTER_HIDDEN_EVENT ones.
+ * Plays the "open" sound on the tap that opens a letter. Renders an empty box
+ * without WebGL.
  */
 export default function LettersScene({ letters, onOpen, paused = false, className }: LettersSceneProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -39,7 +44,15 @@ export default function LettersScene({ letters, onOpen, paused = false, classNam
     if (!root || !labelAnchor || !labelPill) return;
     let engine: LettersEngine | null = null;
     try {
-      engine = new LettersEngine({ root, labelAnchor, labelPill, onOpen: (id) => onOpenRef.current(id) });
+      engine = new LettersEngine({
+        root,
+        labelAnchor,
+        labelPill,
+        onOpen: (id) => {
+          void play("open"); // inside the click: the gesture unlocks audio
+          onOpenRef.current(id);
+        },
+      });
     } catch {
       engine = null; // no WebGL: the hero's CSS layer carries the look
     }
@@ -74,7 +87,7 @@ export default function LettersScene({ letters, onOpen, paused = false, classNam
         <div
           ref={pillRef}
           data-visible="false"
-          className="font-hand translate-y-1.5 scale-95 rounded-full border border-plum-100 bg-cream/95 px-4 py-1 text-lg leading-8 whitespace-nowrap text-plum opacity-0 shadow-[var(--shadow-soft)] backdrop-blur-sm transition duration-300 ease-out data-[visible=true]:translate-y-0 data-[visible=true]:scale-100 data-[visible=true]:opacity-100"
+          className={LABEL_PILL_CLASS}
         />
       </div>
     </div>

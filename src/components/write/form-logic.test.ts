@@ -7,6 +7,7 @@ import {
   FORM_ERRORS,
   isValidContact,
   parseDraft,
+  prefillAction,
   serializeDraft,
   validateForm,
   type FormFields,
@@ -148,5 +149,50 @@ describe("small helpers", () => {
   it("finds the first invalid field in reading order", () => {
     expect(firstInvalid(["contact", "body", "school"])).toBe("school");
     expect(firstInvalid([])).toBeNull();
+  });
+});
+
+describe("prefillAction", () => {
+  const max = 40;
+
+  it("leaves the letter alone for the generic CTA", () => {
+    expect(prefillAction("", { toName: "سعد", body: "شكراً على كل شي" }, max)).toEqual({ kind: "none" });
+    expect(prefillAction("   ", { toName: "", body: "" }, max)).toEqual({ kind: "none" });
+  });
+
+  it("fills an empty addressee and keeps a title picked for it", () => {
+    expect(prefillAction(" نورة ", { toName: "", body: "" }, max)).toEqual({
+      kind: "set",
+      toName: "نورة",
+      clearTitle: false,
+    });
+    expect(prefillAction("نورة", { toName: "  ", body: "نص بدون اسم" }, max)).toMatchObject({
+      kind: "set",
+      clearTitle: false,
+    });
+  });
+
+  it("replaces another name without a body, dropping that name's title", () => {
+    expect(prefillAction("نورة", { toName: "سعد", body: " " }, max)).toEqual({
+      kind: "set",
+      toName: "نورة",
+      clearTitle: true,
+    });
+  });
+
+  it("asks before readdressing an unfinished letter", () => {
+    expect(prefillAction("زززز", { toName: "سعد", body: "شكراً على كل شي" }, max)).toEqual({
+      kind: "ask",
+      toName: "زززز",
+    });
+  });
+
+  it("does nothing when the name is already there", () => {
+    expect(prefillAction("سعد  العتيبي", { toName: "سعد العتيبي", body: "نص" }, max)).toEqual({ kind: "none" });
+  });
+
+  it("clamps long names", () => {
+    const action = prefillAction("ن".repeat(60), { toName: "", body: "" }, max);
+    expect(action.kind === "set" && action.toName.length).toBe(max);
   });
 });

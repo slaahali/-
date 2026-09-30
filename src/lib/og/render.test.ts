@@ -35,11 +35,16 @@ describe("sceneFor", () => {
     const s = sceneFor({ kind: "letter", m: { ...m, inMemory: true } });
     expect(s.kind).toBe("letter");
     if (s.kind !== "letter") return;
-    expect(s.to).toBe("إلى روح أستاذة نورة");
-    expect(s.label).toBe("في ذكرى");
+    expect(s.toLabel).toBe("إلى روح");
+    expect(s.toName).toBe("أستاذة نورة");
     expect(s.memory).toBe(true);
     expect(s.stamp).not.toMatch(/\p{Extended_Pictographic}/u);
     expect(s.signature).toBe("— أحد طلابك");
+    expect(s.date).toMatch(/أكتوبر/);
+  });
+  it("embeds the official logo as a PNG data URI", () => {
+    const s = sceneFor({ kind: "default" });
+    expect(s.brand.logo).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
   });
 });
 
@@ -55,6 +60,13 @@ describe("renderOgPng", () => {
       const png = await renderOgPng(input);
       expect(pngSize(png)).toEqual({ width: 1200, height: 630 });
     }
+  });
+  it("rasterises off the event loop", async () => {
+    let ticks = 0;
+    const iv = setInterval(() => ticks++, 1);
+    await renderOgPng({ kind: "letter", m: { ...m, id: "async-check" } });
+    clearInterval(iv);
+    expect(ticks).toBeGreaterThan(3);
   });
   it("caches identical requests", async () => {
     const a = renderOgPng({ kind: "search", q: "كاش", total: 2 });

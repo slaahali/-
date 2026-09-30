@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icon3D } from "@/components/ui/Icon3D";
+import { COPY } from "@/lib/config";
 import { ChefzLogo } from "./ChefzLogo";
 import { GiftLink } from "./GiftLink";
 
 const NAV = [
-  { href: "#write", label: "اكتب رسالتك" },
+  { href: "#write", label: COPY.heroCtaWrite },
   { href: "#letters", label: "ابحث عن اسمك" },
 ] as const;
 
@@ -46,7 +47,7 @@ export function Header() {
         <Link
           href="/"
           aria-label="ذا شفز — الصفحة الرئيسية"
-          className="-m-1.5 shrink-0 rounded-xl p-1.5"
+          className="-mx-1.5 inline-flex min-h-11 shrink-0 items-center rounded-xl px-1.5"
         >
           <ChefzLogo fluid priority height={30} className="h-[26px] sm:h-[30px]" />
         </Link>
@@ -66,19 +67,14 @@ export function Header() {
         <div className="ms-auto flex items-center gap-2">
           <GiftLink
             from="header"
-            className="hidden h-11 items-center gap-2 rounded-full border border-orange-100 bg-white/85 ps-1.5 pe-4 text-sm font-bold text-plum shadow-soft transition-[border-color,background-color,transform] duration-200 hover:-translate-y-px hover:border-orange-300 hover:bg-white md:inline-flex"
+            className="hidden min-h-11 items-center gap-1.5 rounded-xl px-3 text-[0.95rem] font-bold text-orange-700 transition-colors hover:bg-orange-50 md:inline-flex"
           >
-            <span className="grid size-8 place-items-center rounded-full bg-orange-50">
-              <Icon3D name="gift" size={28} priority />
-            </span>
+            <Icon3D name="gift" size={32} priority className="-my-1" />
             {GIFT_LABEL}
           </GiftLink>
 
-          <a
-            href="#write"
-            className="btn btn-primary min-h-11 px-4 py-2 text-sm md:hidden"
-          >
-            اكتب رسالتك
+          <a href="#write" className="btn btn-primary min-h-11 px-4 py-2 text-[0.95rem] md:hidden">
+            {COPY.heroCtaWrite}
           </a>
           <GiftLink from="header" label={GIFT_LABEL} className="icon-btn shadow-soft md:hidden">
             <Icon3D name="gift" size={28} priority />

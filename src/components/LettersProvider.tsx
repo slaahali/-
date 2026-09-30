@@ -395,29 +395,24 @@ export function LettersProvider({
 
   // Written synchronously so rapid taps read the count they just produced.
   const countsRef = useRef<Record<string, number>>({});
-  const [likeSync] = useState(() =>
-    createLikeSync({
+  const likeSync = useRef<ReturnType<typeof createLikeSync> | null>(null);
+
+  const toggleLike = useCallback((m: PublicMessage) => {
+    likeSync.current ??= createLikeSync({
       send: likeMessage,
-      read: (m) => ({
-        liked: likedStore.get().has(m.id),
-        count: countsRef.current[m.id] ?? m.likes,
+      read: (x) => ({
+        liked: likedStore.get().has(x.id),
+        count: countsRef.current[x.id] ?? x.likes,
       }),
       write: (id, isLiked, count) => {
-        const n = Math.max(0, count);
-        countsRef.current = { ...countsRef.current, [id]: n };
+        countsRef.current = { ...countsRef.current, [id]: Math.max(0, count) };
         likedStore.update(id, isLiked);
         setCounts(countsRef.current);
       },
-    }),
-  );
-
-  const toggleLike = useCallback(
-    (m: PublicMessage) => {
-      if (!likedStore.get().has(m.id)) track("letter_like", { id: m.id });
-      return likeSync(m);
-    },
-    [likeSync],
-  );
+    });
+    if (!likedStore.get().has(m.id)) track("letter_like", { id: m.id });
+    return likeSync.current(m);
+  }, []);
 
   const requestPrefill = useCallback((toName: string) => {
     setPrefill({ toName, nonce: Date.now() });
