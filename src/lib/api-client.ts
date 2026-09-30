@@ -3,9 +3,11 @@
 import type {
   ApiError,
   CreateMessageBody,
+  CreateMessageResponse,
   LikeResult,
   ListResult,
   PublicMessage,
+  ReportReason,
   SortMode,
 } from "./types";
 
@@ -39,7 +41,7 @@ export async function fetchMessage(id: string, signal?: AbortSignal): Promise<Pu
 }
 
 export type CreateResult =
-  | { ok: true; message: PublicMessage }
+  | { ok: true; message: PublicMessage; status: CreateMessageResponse["status"] }
   | { ok: false; status: number; error: ApiError };
 
 export async function createMessage(body: CreateMessageBody): Promise<CreateResult> {
@@ -54,8 +56,8 @@ export async function createMessage(body: CreateMessageBody): Promise<CreateResu
     return { ok: false, status: 0, error: { error: "server", message: "network" } };
   }
   if (res.status === 201) {
-    const data = await readJson<{ message: PublicMessage }>(res);
-    if (data?.message) return { ok: true, message: data.message };
+    const data = await readJson<CreateMessageResponse>(res);
+    if (data?.message) return { ok: true, message: data.message, status: data.status ?? "published" };
   }
   const err = (await readJson<ApiError>(res)) ?? { error: "server" as const };
   return { ok: false, status: res.status, error: err };
@@ -75,15 +77,22 @@ export async function likeMessage(id: string, like: boolean): Promise<LikeResult
   }
 }
 
-export async function reportMessage(id: string, reason?: string): Promise<boolean> {
+/** Returns null on failure, otherwise whether the letter is now hidden. */
+export async function reportMessage(
+  id: string,
+  reason: ReportReason,
+  note?: string,
+): Promise<{ hidden: boolean } | null> {
   try {
     const res = await fetch(`/api/messages/${encodeURIComponent(id)}/report`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reason: reason ?? null }),
+      body: JSON.stringify({ reason, note: note ?? null }),
     });
-    return res.ok;
+    if (!res.ok) return null;
+    const data = await readJson<{ ok: boolean; hidden?: boolean }>(res);
+    return { hidden: Boolean(data?.hidden) };
   } catch {
-    return false;
+    return null;
   }
 }

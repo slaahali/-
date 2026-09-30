@@ -25,6 +25,7 @@ export const BRAND_URL = process.env.NEXT_PUBLIC_BRAND_URL || "https://thechefz.
 export const HASHTAG = process.env.NEXT_PUBLIC_HASHTAG || "#شكرا_معلمي";
 
 export const permalink = (id: string) => `${SITE_URL}/m/${id}`;
+export const searchLink = (q: string) => `${SITE_URL}/?q=${encodeURIComponent(q.trim())}#letters`;
 
 // ---------------------------------------------------------------------------
 // Copy. Final wording is owned by the content team; keep it all here so they
@@ -63,16 +64,33 @@ export const COPY = {
   ],
   labelFrom: "اسم المرسل (الطالب)",
   placeholderFrom: "اسمك — أو خلّه سر 🤫",
+
+  labelColor: "اختر لون الكارد",
+  labelMemory: "في ذكرى 🤍",
+  memoryHint: "إذا معلمك متوفى — تنعرض رسالتك بشكل هادئ ومحترم",
+
+  surpriseTitle: "نبي نفاجئ معلمك! 🎁🎥",
+  surpriseLead:
+    "بنختار مجموعة من أجمل الرسائل ونفاجئ المعلمين بهدية من ذا شفز. تبي نتواصل معك لو انختارت رسالتك؟",
+  surpriseOptIn: "إيه، تواصلوا معي لو انختارت رسالتي",
+  labelContact: "رقم جوالك أو إيميلك",
+  placeholderContact: "05xxxxxxxx أو name@email.com",
+  contactPrivacy:
+    "ما ينشر أبداً — يشوفه فريق ذا شفز بس، ونستخدمه للتواصل معك بخصوص المفاجأة فقط.",
+
   giftLink: "تبي ترسل له هدية؟ 🎁",
   submit: "إرسال",
   submitting: "جاري الإرسال…",
 
   moderationError: "رسالتك فيها كلمات ما تناسب المكان 🙏 عدّلها شوي وأرسلها",
-  rateLimited: "أرسلت رسائل كثير بوقت قصير، جرّب بعد شوي 💜",
+  rateLimited: "وصلت للحد اليومي من الرسائل 💜 تقدر ترسل رسائل ثانية بكرة",
   genericError: "صار خطأ بسيط، حاول مرة ثانية",
 
   successTitle: "وصلت رسالتك 💜",
   successLead: "رسالتك صارت على جدار الامتنان. شاركها مع معلمك عشان يشوفها!",
+  pendingTitle: "وصلت رسالتك 💜",
+  pendingLead:
+    "بتنشر بعد مراجعة سريعة من فريقنا (نراجع بعض الرسائل يدوياً عشان يبقى الجدار آمن للكل).",
   writeAnother: "اكتب رسالة ثانية",
 
   wallTitle: "جدار الامتنان",
@@ -81,19 +99,38 @@ export const COPY = {
   sortNew: "الأحدث",
   sortTop: "الأكثر حب",
   loadMore: "عرض المزيد",
-  emptySearch: "ما لقينا رسائل بهالاسم… يمكن تكون أول من يكتب له!",
-  emptySearchCta: "اكتب له رسالة ✍️",
+  searchResults: (n: string, q: string) => `${n} رسالة لـ «${q}»`,
+  shareSearch: "شارك النتيجة",
+  shareSearchText: (q: string, n: number) =>
+    n > 0 ? `شوف رسائل الشكر اللي انكتبت لـ «${q}» 💜` : `يمكن أحد كتب لك… ابحث عن اسمك 👀`,
+  // Search found nothing → the page becomes an invitation.
+  emptySearchTitle: "ما أحد كتب لك للحين؟",
+  emptySearch: "ابدأ أنت واكتب لأحد علّمك 💜",
+  emptySearchCtaTo: (q: string) => `اكتب رسالة لـ «${q}» ✍️`,
+  emptySearchCta: "اكتب لأحد علّمك ✍️",
   emptyWall: "كن أول من يكتب رسالة شكر لمعلمه 💜",
   readMore: "اقرأ الرسالة",
   anonymousFrom: "أحد طلابك",
   like: "أعجبني",
+  memoryLike: "دعوة بالرحمة",
+  memoryTag: "في ذكرى 🕊️",
   share: "مشاركة",
-  report: "إبلاغ",
+
+  report: "إبلاغ / طلب حذف",
+  reportReasons: {
+    inappropriate: "محتوى غير لائق",
+    removal_request: "أنا الشخص المذكور وأبي أحذفها",
+    other: "سبب آخر",
+  },
+  reportDone: "شكراً، بنراجعها 🙏",
+  removalDone: "أخفينا الرسالة وبنراجع طلبك 🙏",
 
   stamp: "شكراً معلمي",
+  memoryStamp: "في ذكراك 🤍",
   shareTitle: (to: string) => `رسالة شكر إلى ${to} 💜`,
   shareText: (to: string) =>
     `أحد طلابك كتب لك رسالة شكر يا ${to} 💜 اقرأها هنا:`,
+  memoryShareText: (to: string) => `رسالة وفاء إلى روح ${to} 🤍`,
 
   footerNote:
     "كل الرسائل تمر على فلتر آلي قبل النشر. شفت شي مو مناسب؟ اضغط «إبلاغ» على الرسالة.",

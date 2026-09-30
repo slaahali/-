@@ -22,22 +22,55 @@ export const ICONS = Object.fromEntries(
   ]),
 ) as Record<IconName, IconEntry>;
 
-/** Visual identity of each letter variant (index = PublicMessage.variant). */
-export const VARIANTS: ReadonlyArray<{
-  icon: IconName;
-  /** Accent used for the card band, stamp, and share-card background. */
+export interface CardStyle {
+  key: string;
+  /** Arabic colour name shown in the colour picker. */
+  name: string;
+  /** Strong colour: card band, stamp, like heart, story-card background. */
   accent: string;
-  /** Very light tint of the accent for backgrounds. */
-  tint: string;
-  /** Two-stop gradient for the illustration card in the letter view. */
+  /** Whole-card background (light enough for plum/ink body text, AA contrast). */
+  bg: string;
+  /** Text colour to use on `bg`. */
+  ink: string;
+  /** Two-stop gradient for the illustration card in the letter view / share images. */
   gradient: [string, string];
-}> = [
-  { icon: "letter", accent: "#691d4e", tint: "#f6ecf2", gradient: ["#a73784", "#691d4e"] },
-  { icon: "books", accent: "#eb652c", tint: "#fdeee6", gradient: ["#f7a64f", "#eb652c"] },
-  { icon: "pencil", accent: "#a73784", tint: "#f8edf5", gradient: ["#d77fb8", "#a73784"] },
-  { icon: "cap", accent: "#c98a2e", tint: "#fbf2e3", gradient: ["#f7c87a", "#d9913a"] },
-  { icon: "plane", accent: "#691d4e", tint: "#f3ecf0", gradient: ["#eb652c", "#a73784"] },
-  { icon: "heart", accent: "#eb652c", tint: "#fff1ea", gradient: ["#f59a6b", "#e0561f"] },
+  /** 3D icon that illustrates this card. */
+  icon: IconName;
+}
+
+/**
+ * Card colours the writer picks from (index = PublicMessage.variant). All from
+ * The Chefz palette so the wall looks lively but on-brand.
+ */
+export const CARD_COLORS: ReadonlyArray<CardStyle> = [
+  { key: "plum", name: "موف", accent: "#691d4e", bg: "#f3e4ee", ink: "#3d0f2d", gradient: ["#a73784", "#691d4e"], icon: "letter" },
+  { key: "orange", name: "برتقالي", accent: "#eb652c", bg: "#fde3d6", ink: "#4f1f0c", gradient: ["#f7a64f", "#eb652c"], icon: "books" },
+  { key: "magenta", name: "فوشي", accent: "#a73784", bg: "#f6def0", ink: "#45122f", gradient: ["#d77fb8", "#a73784"], icon: "pencil" },
+  { key: "gold", name: "ذهبي", accent: "#c98a2e", bg: "#fcecd0", ink: "#47300f", gradient: ["#f7c87a", "#d9913a"], icon: "cap" },
+  { key: "peach", name: "خوخي", accent: "#e8743f", bg: "#ffe9df", ink: "#4f1f0c", gradient: ["#f9b793", "#eb652c"], icon: "plane" },
+  { key: "cream", name: "كريمي", accent: "#8a5a3c", bg: "#fbf5ec", ink: "#2a1422", gradient: ["#f4ece0", "#d9bfa3"], icon: "heart" },
 ];
 
-export const variantOf = (v: number) => VARIANTS[((v % VARIANTS.length) + VARIANTS.length) % VARIANTS.length];
+/** Calm, respectful look for "في ذكرى" letters, regardless of the chosen colour. */
+export const MEMORY_STYLE: CardStyle = {
+  key: "memory",
+  name: "في ذكرى",
+  accent: "#6f6275",
+  bg: "#f1eef3",
+  ink: "#2f2734",
+  gradient: ["#c9c0cf", "#6f6275"],
+  icon: "letter",
+};
+
+export const colorAt = (v: number): CardStyle =>
+  CARD_COLORS[((Math.trunc(v) % CARD_COLORS.length) + CARD_COLORS.length) % CARD_COLORS.length];
+
+/** The style to render a letter with (memory letters always use MEMORY_STYLE). */
+export function cardStyle(m: { variant: number; inMemory?: boolean }): CardStyle {
+  return m.inMemory ? MEMORY_STYLE : colorAt(m.variant);
+}
+
+/** @deprecated use cardStyle(m) / colorAt(v). Kept for older call sites. */
+export const VARIANTS = CARD_COLORS;
+/** @deprecated use cardStyle(m) / colorAt(v). */
+export const variantOf = colorAt;

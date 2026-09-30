@@ -7,8 +7,10 @@ export interface SceneLetter {
   label: string;
   /** First ~80 chars of the letter, drawn as "handwriting" on the paper texture. */
   snippet: string;
-  /** 0..VARIANT_COUNT-1 */
+  /** Card colour 0..VARIANT_COUNT-1 — use cardStyle(letter) from ./assets. */
   variant: number;
+  /** "في ذكرى" letter: calm paper, no playful effects. */
+  inMemory: boolean;
 }
 
 /** Fired on window when a visitor publishes a letter: the scene flies it in. */

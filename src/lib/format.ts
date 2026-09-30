@@ -7,9 +7,18 @@ export function displayTo(m: { title: TeacherTitle | null; toName: string }): st
   return m.title ? `${TEACHER_TITLES[m.title]} ${m.toName}` : m.toName;
 }
 
-/** "إلى: أستاذة نورة" */
-export function toLine(m: { title: TeacherTitle | null; toName: string }): string {
-  return `${COPY.labelTo} ${displayTo(m)}`;
+/** "إلى: أستاذة نورة" — or "إلى روح أستاذة نورة" for in-memory letters. */
+export function toLine(m: { title: TeacherTitle | null; toName: string; inMemory?: boolean }): string {
+  return m.inMemory ? `إلى روح ${displayTo(m)}` : `${COPY.labelTo} ${displayTo(m)}`;
+}
+
+/** Share text for a letter (respectful wording for in-memory letters). */
+export function shareTextFor(m: { title: TeacherTitle | null; toName: string; inMemory?: boolean }): string {
+  return m.inMemory ? COPY.memoryShareText(displayTo(m)) : COPY.shareText(displayTo(m));
+}
+
+export function stampFor(m: { inMemory?: boolean }): string {
+  return m.inMemory ? COPY.memoryStamp : COPY.stamp;
 }
 
 /** Signature line. Anonymous letters are signed "أحد طلابك". */
@@ -54,5 +63,11 @@ export function excerpt(text: string, max: number): string {
 }
 
 export function toSceneLetter(m: PublicMessage): SceneLetter {
-  return { id: m.id, label: toLine(m), snippet: excerpt(m.body, 90), variant: m.variant };
+  return {
+    id: m.id,
+    label: toLine(m),
+    snippet: excerpt(m.body, 90),
+    variant: m.variant,
+    inMemory: m.inMemory,
+  };
 }
