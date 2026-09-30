@@ -1,0 +1,330 @@
+/* Wall + letter cards. Colours come from cardStyle(m) via --card-* custom
+   properties set inline; brand tokens are read with hex fallbacks. */
+
+.card {
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --card-accent-ink: color-mix(in oklab, var(--card-accent) 66%, var(--card-ink));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.55rem 1.3rem 0.8rem;
+  border-radius: 22px;
+  background-color: var(--card-bg);
+  color: var(--card-ink);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.7),
+    0 14px 30px -18px rgb(105 29 78 / 0.34),
+    0 2px 6px -2px rgb(105 29 78 / 0.08);
+  rotate: var(--tilt, 0deg);
+  transition:
+    rotate 0.45s var(--ease),
+    translate 0.45s var(--ease),
+    box-shadow 0.45s var(--ease),
+    opacity 0.3s;
+}
+
+@media (hover: hover) {
+  .card:hover {
+    rotate: 0deg;
+    translate: 0 -5px;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.7),
+      0 28px 54px -24px rgb(105 29 78 / 0.42),
+      0 6px 14px -6px rgb(105 29 78 / 0.12);
+  }
+}
+.card:focus-within {
+  rotate: 0deg;
+}
+.card:hover,
+.card:focus-within {
+  z-index: 2;
+}
+/* Keep an open share/report popover above the neighbouring cards. */
+.card:has([aria-expanded="true"]) {
+  z-index: 5;
+}
+
+/* Accent band along the top edge. */
+.deco {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.deco::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 5px;
+  background: var(--card-accent);
+}
+
+/* Little wax seal with a heart, top end corner. */
+.seal {
+  position: absolute;
+  top: 1rem;
+  inset-inline-end: 1rem;
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  color: #fff;
+  background: radial-gradient(
+    circle at 35% 30%,
+    color-mix(in srgb, var(--card-accent) 55%, #fff) 0%,
+    var(--card-accent) 62%
+  );
+  box-shadow:
+    0 4px 10px -3px color-mix(in srgb, var(--card-accent) 70%, transparent),
+    inset 0 -2px 3px rgb(0 0 0 / 0.14);
+  rotate: -12deg;
+  pointer-events: none;
+}
+
+/* Stretched button: the whole card opens the letter; the actions sit above it. */
+.open {
+  display: block;
+  width: 100%;
+  text-align: start;
+  color: inherit;
+}
+.open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+.open:focus-visible {
+  outline: none;
+}
+.open:focus-visible::after {
+  outline: 3px solid var(--color-orange, #eb652c);
+  outline-offset: 4px;
+}
+
+.body {
+  font-size: 1rem;
+  line-height: 1.9;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 7;
+  line-clamp: 7;
+  overflow: hidden;
+  /* faint notebook rules under each line */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(1lh - 1px),
+    color-mix(in srgb, var(--card-ink) 8%, transparent) calc(1lh - 1px),
+    color-mix(in srgb, var(--card-ink) 8%, transparent) 1lh
+  );
+}
+.clamped {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.8em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.8em), transparent);
+}
+
+.readMore {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--card-accent-ink);
+  transition: gap 0.25s var(--ease);
+}
+.card:hover .readMore {
+  gap: 0.65rem;
+}
+
+.signature {
+  color: var(--card-accent-ink);
+}
+
+.memoryTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
+  padding: 0.15rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: rgb(255 255 255 / 0.7);
+  border: 1px solid color-mix(in srgb, var(--card-accent) 30%, transparent);
+  color: var(--card-accent-ink);
+}
+
+.actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.1rem;
+  padding-top: 0.6rem;
+  border-top: 1.5px dashed color-mix(in srgb, var(--card-accent) 24%, transparent);
+}
+
+/* In-memory letters: calm — no tilt, no playful lift. */
+.memory {
+  rotate: 0deg;
+}
+@media (hover: hover) {
+  .memory:hover {
+    translate: 0 -2px;
+  }
+}
+
+/* A letter this visitor just published. */
+.fresh {
+  animation:
+    fresh-in 0.7s var(--ease) backwards,
+    glow 1.8s ease-in-out 0.6s 3;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--card-accent) 45%, transparent),
+    0 22px 48px -20px color-mix(in srgb, var(--card-accent) 75%, transparent);
+}
+.freshBadge {
+  position: absolute;
+  top: -0.8rem;
+  inset-inline-start: 1.1rem;
+  z-index: 3;
+  padding: 0.2rem 0.75rem;
+  border-radius: 999px;
+  background: var(--card-accent);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--card-accent) 80%, transparent);
+  pointer-events: none;
+}
+@keyframes fresh-in {
+  from {
+    opacity: 0;
+    translate: 0 -18px;
+    scale: 0.96;
+  }
+}
+@keyframes glow {
+  50% {
+    box-shadow:
+      0 0 0 8px color-mix(in srgb, var(--card-accent) 16%, transparent),
+      0 26px 60px -20px color-mix(in srgb, var(--card-accent) 85%, transparent);
+  }
+}
+
+/* Taken off the wall (e.g. removal request) — fade out before it's removed. */
+.leaving {
+  pointer-events: none;
+  animation: leave 0.45s var(--ease) forwards;
+}
+@keyframes leave {
+  to {
+    opacity: 0;
+    scale: 0.94;
+    filter: blur(2px);
+  }
+}
+
+/* ---- skeleton ---- */
+.skeleton {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.6rem 1.3rem 1.2rem;
+  border-radius: 22px;
+  background: #f4ebe3;
+  overflow: hidden;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.6) 50%, transparent 70%);
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+.bar {
+  height: 0.8rem;
+  border-radius: 999px;
+  background: rgb(105 29 78 / 0.08);
+}
+@keyframes shimmer {
+  from {
+    translate: 100% 0;
+  }
+  to {
+    translate: -100% 0;
+  }
+}
+
+/* ---- section + empty states ---- */
+.section {
+  position: relative;
+  isolation: isolate;
+}
+.section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40rem 22rem at 85% 0%, rgb(235 101 44 / 0.1), transparent 70%),
+    radial-gradient(36rem 24rem at 10% 12%, rgb(167 55 132 / 0.08), transparent 70%);
+}
+
+.invite {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1.5px solid var(--color-orange-100, #fde6db);
+  background:
+    radial-gradient(28rem 16rem at 100% 0%, rgb(247 166 79 / 0.22), transparent 70%),
+    radial-gradient(26rem 18rem at 0% 100%, rgb(167 55 132 / 0.14), transparent 70%),
+    linear-gradient(180deg, #fffaf5, #fdf1ea);
+  box-shadow: 0 30px 70px -40px rgb(105 29 78 / 0.45);
+}
+.inviteIcons {
+  position: relative;
+  width: 9.5rem;
+  height: 8rem;
+  margin-inline: auto;
+}
+.floaty {
+  animation: floaty 6s ease-in-out infinite;
+}
+.floatyLate {
+  animation: floaty 6s ease-in-out -3s infinite;
+}
+@keyframes floaty {
+  0%,
+  100% {
+    translate: 0 0;
+    rotate: -4deg;
+  }
+  50% {
+    translate: 0 -10px;
+    rotate: 3deg;
+  }
+}
+
+.toast {
+  animation: toast-in 0.45s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 0 16px;
+  }
+}
