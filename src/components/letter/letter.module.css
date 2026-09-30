@@ -13,7 +13,10 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  overscroll-behavior-x: none;
   -webkit-overflow-scrolling: touch;
+  /* Horizontal drags are ours (prev/next), not the browser's back gesture. */
+  touch-action: pan-y pinch-zoom;
 }
 /* On a pseudo-element: a background layer with effects on the scroll container
    itself would become the containing block of the fixed chrome. */
@@ -45,10 +48,8 @@
 .topBtn {
   pointer-events: auto;
   border-color: rgb(105 29 78 / 0.16);
-  background: rgb(255 253 248 / 0.92);
+  background: rgb(255 253 248 / 0.96);
   box-shadow: 0 8px 20px -12px rgb(60 20 40 / 0.45);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   animation: fade-in 0.28s ease-out both;
 }
 .close {
@@ -436,11 +437,10 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.65rem 1rem calc(0.65rem + env(safe-area-inset-bottom));
-  background: rgb(255 253 248 / 0.94);
+  /* opaque on purpose: a backdrop blur here repaints the whole view every frame */
+  background: rgb(255 253 248 / 0.97);
   border-top: 1px solid rgb(105 29 78 / 0.1);
   box-shadow: 0 -14px 30px -22px rgb(60 20 40 / 0.4);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
 }
 .actionsIn {
   animation: bar-in 0.45s var(--ease) 0.25s backwards;
@@ -806,8 +806,6 @@
     background: none;
     border: 0;
     box-shadow: none;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
   .actionsIn {
     animation: fade-in 0.45s ease-out 0.45s backwards;

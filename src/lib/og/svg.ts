@@ -148,13 +148,14 @@ type Face = "molhim" | "molhimBold" | "plex" | "plexBold" | "ruqaa" | "ruqaaBold
 // Average advance per character in em, fitted against the bundled TTFs with
 // resvg (p95 error ≈ 9%) plus ~8% headroom so estimated lines never overflow.
 // "sp" also absorbs the wider word-final letter forms.
-const EM: Record<Face, { ar: number; sp: number; dig: number; lat: number }> = {
-  molhim: { ar: 0.36, sp: 0.74, dig: 0.43, lat: 0.52 },
-  molhimBold: { ar: 0.355, sp: 0.74, dig: 0.42, lat: 0.52 },
-  plex: { ar: 0.41, sp: 0.58, dig: 0.63, lat: 0.56 },
-  plexBold: { ar: 0.44, sp: 0.6, dig: 0.64, lat: 0.6 },
-  ruqaa: { ar: 0.35, sp: 0.27, dig: 0.53, lat: 0.53 },
-  ruqaaBold: { ar: 0.35, sp: 0.27, dig: 0.58, lat: 0.57 },
+// "dash" = the em dash that opens every signature (a full em in Ruqaa).
+const EM: Record<Face, { ar: number; sp: number; dig: number; lat: number; dash: number }> = {
+  molhim: { ar: 0.36, sp: 0.74, dig: 0.43, lat: 0.52, dash: 0.52 },
+  molhimBold: { ar: 0.355, sp: 0.74, dig: 0.42, lat: 0.52, dash: 0.52 },
+  plex: { ar: 0.41, sp: 0.58, dig: 0.63, lat: 0.56, dash: 0.8 },
+  plexBold: { ar: 0.44, sp: 0.6, dig: 0.64, lat: 0.6, dash: 0.8 },
+  ruqaa: { ar: 0.35, sp: 0.27, dig: 0.53, lat: 0.62, dash: 1 },
+  ruqaaBold: { ar: 0.35, sp: 0.27, dig: 0.58, lat: 0.66, dash: 1 },
 };
 
 /** Molhim when every given string fits it (after punctuation swaps), else Plex — one family per block. */
@@ -180,6 +181,7 @@ export function textWidth(s: string, size: number, font: OgFont, forced?: "molhi
     const c = ch.codePointAt(0)!;
     if ((c >= 0x064b && c <= 0x065f) || c === 0x0670 || (c >= 0x06d6 && c <= 0x06ed)) continue; // tashkeel
     if (c === 0x20) w += m.sp;
+    else if (c === 0x2014) w += m.dash;
     else if ((c >= 0x30 && c <= 0x39) || (c >= 0x660 && c <= 0x669)) w += m.dig;
     else if ((c >= 0x0600 && c <= 0x06ff) || (c >= 0x0750 && c <= 0x077f) || (c >= 0xfb50 && c <= 0xfeff)) w += m.ar;
     else w += m.lat;
@@ -653,7 +655,8 @@ function letterSvg(s: OgLetterScene): string {
   const sig = fitLine(s.signature, TW - 300, 34, 24, "handBold");
   parts.push(text(sig.text, TX, sigY, { size: sig.size, font: "handBold", fill: p.accent }));
   if (s.date) {
-    const dx = TX - textWidth(sig.text, sig.size, "handBold") - 24;
+    // The estimate can run ~10% short on short names: keep a generous gap.
+    const dx = TX - textWidth(sig.text, sig.size, "handBold") * 1.1 - 26;
     parts.push(text(s.date, dx, sigY - 2, { size: 19, font: "sans", fill: INK.inkMute }));
   }
   parts.push(rubberStamp(svg, TL + 122, SY + SH - 62, s.stamp, s.memory ? p.accent : mixHex(p.accent, INK.plum950, 0.1), -9, 30));
@@ -728,7 +731,7 @@ function searchSvg(s: OgSearchScene): string {
     svg.add(text(q.text, R, qBase, { size: q.size, font: "sansBold", fill: INK.plumDeep }));
     const qW = Math.min(560, textWidth(q.text, q.size, "sansBold"));
     svg.add(underline(R, qBase + 16, qW, INK.orange, 5));
-    svg.add(text(s.tagline, R, qBase + 96, { size: 44, font: "handBold", fill: "#a73784" }));
+    svg.add(text(s.tagline, R, qBase + 92, { size: 38, font: "sansBold", fill: "#a73784" }));
     svg.add(text(s.brand.host, R, 596, { size: 20, font: "latinBold", fill: INK.plum, anchor: "end", rtl: false, opacity: 0.8 }));
   } else {
     // Invitation: a blank sheet waiting for a letter, a pencil and an empty envelope.
@@ -741,8 +744,8 @@ function searchSvg(s: OgSearchScene): string {
     svg.add(logo(s.brand, R - logoWidth(s.brand, 34), 64, 34));
     const title = fitLine(s.emptyTitle, 600, 60, 40, "sansBold");
     svg.add(text(title.text, R, 214, { size: title.size, font: "sansBold", fill: INK.plum }));
-    const lead = fitLine(s.emptyLead, 600, 48, 34, "handBold");
-    svg.add(text(lead.text, R, 300, { size: lead.size, font: "handBold", fill: INK.orange }));
+    const lead = fitLine(s.emptyLead, 600, 40, 30, "sansBold");
+    svg.add(text(lead.text, R, 296, { size: lead.size, font: "sansBold", fill: INK.orange }));
     const cta = fitLine(s.emptyCta, 520, 34, 26, "sansBold");
     svg.add(text(cta.text, R, 400, { size: cta.size, font: "sansBold", fill: INK.plumDeep }));
     svg.add(underline(R, 416, textWidth(cta.text, cta.size, "sansBold"), INK.orange, 5));
@@ -774,13 +777,14 @@ function defaultSvg(s: OgDefaultScene): string {
 
   const R = 1128;
   svg.add(logo(s.brand, R - logoWidth(s.brand, 38), 60, 38));
-  svg.add(text(s.eyebrow, R, 170, { size: 26, font: "sansBold", fill: INK.orange }));
-  svg.add(text(s.titleLead, R, 262, { size: 76, font: "sansBold", fill: INK.plum }));
+  svg.add(text(s.eyebrow, R, 164, { size: 26, font: "sansBold", fill: INK.orange }));
+  svg.add(text(s.titleLead, R, 248, { size: 76, font: "sansBold", fill: INK.plum }));
+  // The shadda on «معلّم» rises well above the word: leave it room under the first line.
   const word = s.titleWord;
-  svg.add(text(word, R, 372, { size: 104, font: "sansBold", fill: INK.orange }));
-  svg.add(underline(R, 398, textWidth(word, 104, "sansBold"), INK.orange, 6));
+  svg.add(text(word, R, 394, { size: 104, font: "sansBold", fill: INK.orange }));
+  svg.add(underline(R, 420, textWidth(word, 104, "sansBold"), INK.orange, 6));
   const lead = fitLine(s.lead, 560, 32, 24, "sans");
-  svg.add(text(lead.text, R, 470, { size: lead.size, font: "sans", fill: INK.inkSoft }));
+  svg.add(text(lead.text, R, 490, { size: lead.size, font: "sans", fill: INK.inkSoft }));
   svg.add(text(s.brand.host, R, 596, { size: 20, font: "latinBold", fill: INK.plum, anchor: "end", rtl: false, opacity: 0.8 }));
   return svg.toString();
 }

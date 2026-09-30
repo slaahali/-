@@ -7,8 +7,8 @@ import { LikeButton } from "@/components/ui/LikeButton";
 import { ReportButton } from "@/components/ui/ReportButton";
 import { cardStyle } from "@/lib/assets";
 import { COPY } from "@/lib/config";
-import { displayTo, fromName, toLine } from "@/lib/format";
 import { play } from "@/lib/sound";
+import { displayTo, fromName, toLine } from "@/lib/format";
 import type { PublicMessage } from "@/lib/types";
 import { PostageStamp } from "./PostageStamp";
 import { looksLong, postmarkDate, tiltFor } from "./wall-utils";
@@ -86,6 +86,7 @@ export function MessageCard({
 
       <header className={styles.address}>
         <h3 id={titleId}>
+          {/* The card plays the paper sound itself; LetterModal skips openers inside #letters. */}
           <button
             type="button"
             onClick={() => {

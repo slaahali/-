@@ -47,6 +47,9 @@ function postmarkYear(iso: string): string {
   return Number.isFinite(y) ? String(y).replace(/\d/g, (d) => ARABIC_DIGITS[Number(d)]) : "";
 }
 
+/** Openers that already play the paper sound inside their own click: wall cards, the 3D scenes. */
+const SELF_SOUNDING_OPENERS = "#letters, [data-immersive], canvas";
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -57,7 +60,7 @@ export function LetterModal() {
   // Remember the last click / tap / key press, so an open can tell a visitor's
   // gesture (→ paper sound) from a deep link or the back button (→ silence).
   useEffect(() => {
-    const note = () => noteGesture();
+    const note = (e: Event) => noteGesture(e.target);
     const opts = { capture: true, passive: true } as const;
     window.addEventListener("pointerdown", note, opts);
     window.addEventListener("keydown", note, opts);
@@ -161,7 +164,11 @@ function LetterView({ m }: { m: PublicMessage }) {
   useLayoutEffect(() => {
     if (entry === "none" || playedRef.current === m.id) return;
     playedRef.current = m.id;
-    if (recentGesture()) void play("open");
+    const gesture = recentGesture();
+    if (!gesture) return;
+    const outside = gesture.target && !overlayRef.current?.contains(gesture.target);
+    if (outside && gesture.target?.closest(SELF_SOUNDING_OPENERS)) return;
+    void play("open");
   }, [m.id, entry]);
 
   useEffect(() => {

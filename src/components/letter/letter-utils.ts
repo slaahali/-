@@ -92,15 +92,25 @@ export function letterPalette(s: CardStyle): LetterPalette {
 /** How recent a click / tap / key must be for an open to count as user-initiated. */
 export const GESTURE_WINDOW_MS = 800;
 
-let lastGesture = Number.NEGATIVE_INFINITY;
+let lastGesture: { at: number; target: Element | null } = {
+  at: Number.NEGATIVE_INFINITY,
+  target: null,
+};
 
-export function noteGesture(now: number = Date.now()) {
-  lastGesture = now;
+export function noteGesture(target: EventTarget | null, now: number = Date.now()) {
+  const el = typeof Element !== "undefined" && target instanceof Element ? target : null;
+  lastGesture = { at: now, target: el };
 }
 
-/** True when the visitor pressed something within the last `ms` (deep links → false). */
-export function recentGesture(now: number = Date.now(), ms = GESTURE_WINDOW_MS): boolean {
-  return now - lastGesture <= ms;
+/**
+ * The click / tap / key press of the last `ms`, if any (deep links and the
+ * back button have none). `target` is what was pressed.
+ */
+export function recentGesture(
+  now: number = Date.now(),
+  ms = GESTURE_WINDOW_MS,
+): { target: Element | null } | null {
+  return now - lastGesture.at <= ms ? { target: lastGesture.target } : null;
 }
 
 // ------------------------------------------------------------------ swipes ---

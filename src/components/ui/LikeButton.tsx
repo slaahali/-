@@ -153,7 +153,8 @@ export function LikeButton({
       <span className={hideLabel ? "visually-hidden" : quiet ? "text-[0.85rem]" : undefined}>
         {memory ? COPY.memoryLike : COPY.like}
       </span>
-      {count > 0 && <span className="tabular-nums opacity-80">{formatCount(count)}</span>}
+      {/* the space keeps the accessible name «أعجبني ١٢» instead of «أعجبني١٢» */}
+      {count > 0 && <span className="tabular-nums opacity-80">{` ${formatCount(count)}`}</span>}
     </button>
   );
 }

@@ -41,6 +41,8 @@ const PAGE = 30;
 /** Keep at least this many letters loaded beyond the one on screen. */
 const LOOKAHEAD = 40;
 const HINT_KEY = "tcz_tunnel_hint_v1";
+/** Marks the history entry pushed while the tunnel is open (phone Back closes it). */
+const HISTORY_KEY = "tczTunnel";
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
@@ -94,6 +96,10 @@ function writeHintSeen() {
     /* private mode: the hint just shows again next visit */
   }
 }
+
+const ownsHistoryEntry = () => Boolean((window.history.state as Record<string, unknown> | null)?.[HISTORY_KEY]);
+/** A Back scheduled by the last close, cancelled when the tunnel reopens at once (StrictMode remount). */
+let pendingBack = 0;
 
 function viewOf(d: TunnelData, slot: number): View {
   const list = d.list;
@@ -258,6 +264,7 @@ function TunnelOverlay({
   // Seed (and later seeds) go in first; merging keeps order and ids unique.
   useEffect(() => {
     const d = data();
+    focusRef.current = d.lastSlot;
     if (d.list.add(seed)) engineRef.current?.refresh();
     refreshView();
   }, [seed, data, refreshView]);
@@ -364,6 +371,32 @@ function TunnelOverlay({
       }
     };
   }, []);
+
+  // A history entry while open, so the phone's Back gesture closes the tunnel
+  // instead of leaving the site (in-app browsers close outright). Same path,
+  // no hash: the letter view's own /m/:id entry stacks on top of it.
+  useEffect(() => {
+    if (leaving) return;
+    if (pendingBack) {
+      window.clearTimeout(pendingBack);
+      pendingBack = 0;
+    }
+    if (!ownsHistoryEntry()) {
+      window.history.pushState({ [HISTORY_KEY]: 1 }, "", window.location.pathname + window.location.search);
+    }
+    const onPop = () => {
+      if (!ownsHistoryEntry() && !rootRef.current?.inert) latest.current.onClose();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      // Closed from the page (✕, Esc): drop our entry.
+      pendingBack = window.setTimeout(() => {
+        pendingBack = 0;
+        if (ownsHistoryEntry()) window.history.back();
+      }, 0);
+    };
+  }, [leaving]);
 
   // Leaving: fade out, then unmount (which disposes the engine).
   useEffect(() => {
@@ -500,7 +533,7 @@ function TunnelOverlay({
       aria-describedby={hintId}
       tabIndex={-1}
       data-immersive=""
-      className="fixed inset-0 z-[80] overflow-hidden overscroll-none text-ink outline-none select-none"
+      className={`fixed inset-0 z-[80] overflow-hidden overscroll-none text-ink outline-none select-none ${leaving ? "pointer-events-none" : ""}`}
       style={BACKDROP}
     >
       {/* Paper grain under the letters. */}
@@ -611,8 +644,10 @@ function TunnelOverlay({
               type="button"
               className="btn btn-primary mt-6"
               onClick={() => {
+                const el = document.getElementById(view.empty ? "write" : "letters");
                 onClose();
-                document.getElementById(view.empty ? "write" : "letters")?.scrollIntoView({ block: "start" });
+                // After the fade and the Back that drops our history entry (it may restore scroll).
+                window.setTimeout(() => el?.scrollIntoView({ block: "start" }), 320);
               }}
             >
               {view.empty ? "اكتب رسالتك" : "تصفّح الرسائل"}

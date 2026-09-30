@@ -268,7 +268,7 @@ interface Layout {
 }
 
 const dateFmt = () =>
-  new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", { day: "numeric", month: "long", year: "numeric" });
+  new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Riyadh" });
 
 function layout(ctx: Ctx, m: PublicMessage, f: Fonts): Layout {
   const sans = (w: number) => (s: number) => `${w} ${s}px ${f.sans}`;
