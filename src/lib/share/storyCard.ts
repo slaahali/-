@@ -797,8 +797,17 @@ function drawRubberStamp(ctx: Ctx, f: Fonts, label: string, color: string, cx: n
   ctx.restore();
 }
 
+const FOOTER = { cta: 318, label: 44, labelH: 96, tag: 96 };
+/** Hashtag baseline relative to the pocket line. */
+const FOOTER_END = FOOTER.cta + FOOTER.label + FOOTER.labelH + FOOTER.tag;
+
+/** How far to move the letter down (0 for long letters, up to 120px for short ones). */
+function storyShift(pocket: number): number {
+  return Math.max(0, Math.min(120, H - 110 - (pocket + FOOTER_END)));
+}
+
 function drawFooter(ctx: Ctx, f: Fonts, env: EnvelopeColors, pocket: number) {
-  const ctaY = pocket + 318;
+  const ctaY = pocket + FOOTER.cta;
   ctx.save();
   ctx.direction = "rtl";
   ctx.textAlign = "center";
@@ -815,8 +824,8 @@ function drawFooter(ctx: Ctx, f: Fonts, env: EnvelopeColors, pocket: number) {
   }
   ctx.font = `700 42px ${f.latin}`;
   const lw = Math.min(W - 160, ctx.measureText(host).width + 96);
-  const lh = 96;
-  const ly = ctaY + 44;
+  const lh = FOOTER.labelH;
+  const ly = ctaY + FOOTER.label;
   ctx.save();
   ctx.translate(W / 2, ly + lh / 2);
   ctx.rotate(rad(-1.5));
@@ -838,7 +847,7 @@ function drawFooter(ctx: Ctx, f: Fonts, env: EnvelopeColors, pocket: number) {
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = env.ink;
   ctx.font = `700 40px ${f.latin}`;
-  ctx.fillText(HASHTAG, W / 2, Math.min(H - 70, ly + lh + 96));
+  ctx.fillText(HASHTAG, W / 2, Math.min(H - 70, ly + lh + FOOTER.tag));
   ctx.restore();
 }
 
@@ -877,6 +886,11 @@ export async function renderStoryCard(m: PublicMessage): Promise<Blob> {
     ctx.fillStyle = envGrain;
     ctx.fillRect(0, 0, W, H);
   }
+  // Stories cover the top ~250px (progress bar, profile) and the bottom (reply
+  // bar): when a short letter leaves room at the bottom, move the whole letter
+  // down so the letterhead and the stamp clear the profile row.
+  ctx.save();
+  ctx.translate(0, storyShift(L.pocket));
   drawOpenFlap(ctx, env, L.pocket);
   drawSheet(ctx, L.pocket, paperGrain);
   drawLetterhead(ctx, fonts, img.logo);
@@ -887,6 +901,7 @@ export async function renderStoryCard(m: PublicMessage): Promise<Blob> {
   drawRubberStamp(ctx, fonts, noEmoji(stampFor(m)), memory ? style.accent : mixHex(style.accent, INK.plum950, 0.1), TL + 190, L.pocket - 40);
   drawWaxSeal(ctx, env, img.seal, memory, W / 2, L.pocket + 150, 86, m.id);
   drawFooter(ctx, fonts, env, L.pocket);
+  ctx.restore();
   return canvasToBlob(canvas);
 }
 

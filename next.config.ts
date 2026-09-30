@@ -45,9 +45,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@resvg/resvg-js"],
   // The OG renderer reads TTF files from disk at runtime; make sure they ship.
   outputFileTracingIncludes: {
-    "/api/og": ["./assets/fonts/**/*"],
-    "/api/og/[id]": ["./assets/fonts/**/*"],
-    "/api/og/search": ["./assets/fonts/**/*"],
+    "/api/og": ["./assets/fonts/**/*", "./assets/brand-thechefz-logo.png"],
+    "/api/og/[id]": ["./assets/fonts/**/*", "./assets/brand-thechefz-logo.png"],
+    "/api/og/search": ["./assets/fonts/**/*", "./assets/brand-thechefz-logo.png"],
   },
   async headers() {
     return [

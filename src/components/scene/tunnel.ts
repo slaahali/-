@@ -288,7 +288,8 @@ export class TunnelEngine {
   /** Opens the letter at reading distance (keyboard / "open" button). */
   openFocused(): boolean {
     const k = focusSlot(this.travel, this.geom);
-    for (const s of [k, k + 1, k - 1, k + 2]) {
+    // Same order as the overlay's "open" button label: here, then the next ones.
+    for (const s of [k, k + 1, k + 2, k + 3, k - 1]) {
       const c = s >= 0 ? this.opts.source(s) : null;
       if (c && typeof c === "object") {
         this.opts.onOpen(c.id);

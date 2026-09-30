@@ -104,7 +104,11 @@ let pendingBack = 0;
 function viewOf(d: TunnelData, slot: number): View {
   const list = d.list;
   const count = Math.max(d.total ?? 0, list.length) - list.hiddenCount;
-  const i = list.nearestIndex(slot);
+  let i = list.nearestIndex(slot);
+  // The letter here was taken down (e.g. a removal request from its letter view): name the next one.
+  for (let s = 1; s <= 3 && i >= 0 && list.isHidden(list.letter(i)?.id ?? ""); s++) {
+    i = list.nearestIndex(slot + s * list.stride());
+  }
   const letter = i >= 0 ? list.letter(i) : null;
   return {
     index: i >= 0 ? Math.min(i + 1, Math.max(1, count)) : 0,
@@ -605,7 +609,7 @@ function TunnelOverlay({
       {hint && !noWebGL && !view.empty && (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+0.75rem))] z-20 flex justify-center px-4"
+          className={`pointer-events-none absolute inset-x-0 bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+0.75rem))] z-20 flex justify-center px-4 ${reduced ? "pe-20 sm:pe-4" : ""}`}
         >
           <div className="flex items-center gap-3 rounded-2xl border border-plum-100/80 bg-[#fffdf8]/90 py-2.5 ps-3.5 pe-4 text-[0.95rem] text-ink-soft shadow-[var(--shadow-soft)] backdrop-blur-sm">
             <span className="relative grid h-7 w-[1.1rem] place-items-center rounded-full border-[1.5px] border-plum/40">

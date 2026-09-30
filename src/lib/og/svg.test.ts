@@ -102,6 +102,12 @@ describe("wrapText / fitLine", () => {
     expect(long.size).toBe(34);
     expect(long.text.endsWith("…")).toBe(true);
   });
+  it("does not underestimate short Ruqaa signatures (the date sits right beside them)", () => {
+    // Widths measured with resvg + ArefRuqaa-Bold at 34px.
+    expect(textWidth("— أحد طلابك", 34, "handBold") * 1.1).toBeGreaterThanOrEqual(158);
+    expect(textWidth("— Lama", 34, "handBold") * 1.1).toBeGreaterThanOrEqual(138);
+    expect(textWidth("— فهد", 34, "handBold") * 1.1).toBeGreaterThanOrEqual(78);
+  });
 });
 
 describe("font choice (resvg falls back per <text>, not per glyph)", () => {

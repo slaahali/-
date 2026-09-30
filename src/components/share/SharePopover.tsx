@@ -153,22 +153,26 @@ function Panel({ anchorRef, onClose, id, label, subtitle, children }: Omit<Share
         e.preventDefault();
         e.stopPropagation();
         onCloseRef.current({ restoreFocus: true });
-      } else if (e.key === "Tab" && sheet) {
-        // Modal sheet: keep Tab inside.
+      } else if (e.key === "Tab") {
+        // Sheet (modal): Tab cycles inside. Popover: tabbing past either end
+        // closes it and goes back to the trigger — the popover is portalled to
+        // the end of <body>, so the browser would otherwise drop focus on the
+        // page (or on nothing, inside the inert letter view).
         const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)];
         if (!items.length) return;
         const first = items[0];
         const last = items[items.length - 1];
-        if (!panel.contains(document.activeElement)) {
+        const active = document.activeElement;
+        if (!panel.contains(active)) {
+          if (!sheet) return;
           e.preventDefault();
           first.focus();
-        } else if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
+          return;
         }
+        if (active !== (e.shiftKey ? first : last)) return;
+        e.preventDefault();
+        if (sheet) (e.shiftKey ? last : first).focus();
+        else onCloseRef.current({ restoreFocus: true });
       }
     };
     const onPointerDown = (e: PointerEvent) => {
