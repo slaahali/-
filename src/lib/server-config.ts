@@ -1,6 +1,7 @@
 // Server-only configuration (secrets, storage, moderation policy). Never import
 // this from client components; public settings live in ./config.ts.
 
+import os from "node:os";
 import path from "node:path";
 
 const EXAMPLE_SALT = "change-me-to-a-long-random-string";
@@ -83,5 +84,11 @@ export function shouldSeedDemo(): boolean {
 /** Directory for the JSON file store. */
 export function getDataDir(): string {
   const dir = readEnv("DATA_DIR");
-  return dir ? path.resolve(process.cwd(), dir) : path.join(process.cwd(), ".data");
+  // Serverless hosts (Vercel) only allow writes under /tmp — a zero-config test
+  // deploy then works, though data is per-instance and short-lived.
+  if (!dir && process.env.VERCEL) return path.join(/*turbopackIgnore: true*/ os.tmpdir(), "letters-data");
+  // turbopackIgnore: a runtime-configured folder must not pull the project into the trace.
+  return dir
+    ? path.resolve(/*turbopackIgnore: true*/ process.cwd(), dir)
+    : path.join(/*turbopackIgnore: true*/ process.cwd(), ".data");
 }

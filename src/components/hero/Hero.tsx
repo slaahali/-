@@ -115,7 +115,8 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
             {TITLE_START}
             <br />
             <span className="font-hand relative inline-block px-1 text-[1.18em] leading-[1.05] font-bold text-orange">
-              {TITLE_LAST}
+              {/* Aref Ruqaa lifts the shadda far above the word at display sizes; drop it here. */}
+              {TITLE_LAST.replace(/\u0651/g, "")}
               <svg
                 aria-hidden
                 viewBox="0 0 200 18"

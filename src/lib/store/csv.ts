@@ -59,5 +59,5 @@ export function messagesToCsv(rows: readonly MessageRecord[]): string {
       ]),
     );
   }
-  return `﻿${lines.join("\r\n")}\r\n`;
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
 }

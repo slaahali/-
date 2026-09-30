@@ -1,18 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { PublicMessage } from "../types";
 import { messagesToCsv } from "./csv";
 import { DEMO_LETTERS } from "./demo-data";
 import { FileStore } from "./file-store";
+import { makeTestDir } from "./test-dirs";
 import type { NewMessage } from "./types";
 
-// Temp data lives in the session scratchpad when available, never in the repo.
-const SCRATCH =
-  process.env.TEST_SCRATCH_DIR ??
-  "/tmp/claude-0/-home-user--/e4bc9725-3450-5bd5-ba6f-2dc7f077dce3/scratchpad";
-mkdirSync(SCRATCH, { recursive: true });
-const root = mkdtempSync(path.join(SCRATCH, "file-store-"));
+const root = makeTestDir("file-store-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 let n = 0;

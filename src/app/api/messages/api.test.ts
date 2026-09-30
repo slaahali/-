@@ -1,11 +1,12 @@
 // End-to-end tests of the route handlers against the file store (moderation mocked).
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { COPY } from "@/lib/config";
 import { resetRateLimits } from "@/lib/ratelimit";
+import { makeTestDir } from "@/lib/store/test-dirs";
 import { GET as adminExport } from "../admin/export/route";
 import { DELETE as adminDelete, PATCH as adminPatch } from "../admin/messages/[id]/route";
 import { GET as adminList } from "../admin/messages/route";
@@ -34,11 +35,7 @@ vi.mock("@/lib/moderation", () => ({
   },
 }));
 
-const SCRATCH =
-  process.env.TEST_SCRATCH_DIR ??
-  "/tmp/claude-0/-home-user--/e4bc9725-3450-5bd5-ba6f-2dc7f077dce3/scratchpad";
-mkdirSync(SCRATCH, { recursive: true });
-const root = mkdtempSync(path.join(SCRATCH, "api-"));
+const root = makeTestDir("api-");
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
   vi.unstubAllEnvs();
@@ -226,6 +223,16 @@ describe("public API", () => {
     expect((await like(request(`/api/messages/${id}/like`, { body: { like: "yes" } }), ctx({ id }))).status).toBe(400);
     expect((await like(request(`/api/messages/nope0000/like`, { body: { like: true } }), ctx({ id: "nope0000" }))).status).toBe(404);
     expect((await like(request(`/api/messages/x/like`, { body: { like: true } }), ctx({ id: "../x" }))).status).toBe(404);
+  });
+
+  it("caps cookieless likes on one letter per IP", async () => {
+    const { json } = await post(letter);
+    const id = json.message.id;
+    for (let i = 0; i < 10; i++) {
+      expect((await like(request(`/api/messages/${id}/like`, { body: { like: true } }), ctx({ id }))).status).toBe(200);
+    }
+    const eleventh = await like(request(`/api/messages/${id}/like`, { body: { like: true } }), ctx({ id }));
+    expect(eleventh.status).toBe(429);
   });
 
   it("a removal request hides the letter at once", async () => {

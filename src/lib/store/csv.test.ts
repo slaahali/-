@@ -70,7 +70,7 @@ describe("csv export", () => {
 
   it("writes a BOM, the header and one escaped row per letter", () => {
     const csv = messagesToCsv([record(), record({ id: "second0000", title: null, contact: "a@b.co" })]);
-    expect(csv.startsWith("﻿")).toBe(true);
+    expect(csv.startsWith("\uFEFF")).toBe(true);
     const rows = parseCsv(csv.slice(1));
     expect(rows[0]).toEqual([...EXPORT_COLUMNS]);
     expect(rows).toHaveLength(3);

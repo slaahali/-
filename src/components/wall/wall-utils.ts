@@ -1,5 +1,6 @@
 // Pure helpers for the wall (no React, no DOM) so they can be unit tested.
 
+import { tokenizeQuery } from "@/lib/text/normalize";
 import type { PublicMessage } from "@/lib/types";
 
 /** Queries shorter than this (after trimming) don't hit the API. */
@@ -36,7 +37,9 @@ export function cleanQueryName(q: string): string {
 export function effectiveQuery(typed: string, applied: string): string {
   const t = typed.trim();
   if (!t) return "";
-  return t.length >= MIN_QUERY ? t : applied;
+  if (t.length < MIN_QUERY) return applied;
+  // Only honorifics/punctuation ("أستاذ", "!!") would match every letter.
+  return tokenizeQuery(t).length > 0 ? t : "";
 }
 
 /** Append `more` to `list`, skipping ids already present (pages can overlap). */

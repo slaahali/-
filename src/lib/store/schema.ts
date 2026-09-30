@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS message_reports (
   PRIMARY KEY (message_id, reporter_hash)
 );
 
-ALTER TABLE message_reports ADD COLUMN IF NOT EXISTS note text NULL;
+ALTER TABLE message_reports
+  ADD COLUMN IF NOT EXISTS reason text NULL,
+  ADD COLUMN IF NOT EXISTS note text NULL;
 
 -- Public wall: newest / most loved.
 CREATE INDEX IF NOT EXISTS messages_status_new_idx ON messages (status, created_at DESC, id DESC);

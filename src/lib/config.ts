@@ -95,7 +95,7 @@ export const COPY = {
 
   wallTitle: "جدار الامتنان",
   wallCta: "يمكن أحد كتب لك… اسمك موجود؟ 👀",
-  searchPlaceholder: "ابحث عن اسمك أو اسم مدرستك 🔍",
+  searchPlaceholder: "ابحث عن اسمك أو اسم مدرستك",
   sortNew: "الأحدث",
   sortTop: "الأكثر حب",
   loadMore: "عرض المزيد",

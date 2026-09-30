@@ -22,7 +22,7 @@
   background:
     radial-gradient(50rem 30rem at 100% 0%, rgb(235 101 44 / 0.1), transparent 70%),
     radial-gradient(46rem 32rem at 0% 100%, rgb(167 55 132 / 0.1), transparent 70%),
-    rgb(251 247 242 / 0.92);
+    rgb(251 247 242 / 0.985);
   -webkit-backdrop-filter: blur(14px) saturate(1.1);
   backdrop-filter: blur(14px) saturate(1.1);
   animation: overlay-in 0.28s ease-out both;

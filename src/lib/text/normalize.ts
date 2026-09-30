@@ -6,13 +6,13 @@ import type { TeacherTitle } from "../types";
 
 // Invisible / formatting characters people (or bots) paste to break words
 // apart or smuggle hidden text. ZWJ (U+200D) is handled separately because
-// emoji sequences like 👩‍🏫 need it.
+// emoji sequences like 👩🏫 need it.
 const INVISIBLE =
-  /[­͏؜ᅟᅠ឴឵᠋-᠎​‌‎‏‪-‮⁠-⁯ㅤ﻿ﾠ￹-￻]|\uDB40[\uDC00-\uDC7F]|\uDB40[\uDD00-\uDDEF]|\uD834[\uDD73-\uDD7A]/g;
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0\uFFF9-\uFFFB]|\uDB40[\uDC00-\uDC7F]|\uDB40[\uDD00-\uDDEF]|\uD834[\uDD73-\uDD7A]/g;
 // C0/C1 controls except \n (tabs are turned into spaces before this runs).
 const CONTROL = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/g;
-const ODD_SPACES = /[   -   ⠀　]/g;
-const LINE_BREAKS = /\r\n?|[\u0085  ]/g;
+const ODD_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u2800\u3000]/g;
+const LINE_BREAKS = /\r\n?|[\u0085\u2028\u2029]/g;
 // Combining marks: Latin/general + Arabic harakat/Quranic marks.
 const MARK_CLASS =
   "\\u0300-\\u036F\\u0483-\\u0489\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06DC\\u06DF-\\u06E4\\u06E7\\u06E8\\u06EA-\\u06ED\\u08D3-\\u08FF\\u1AB0-\\u1AFF\\u1DC0-\\u1DFF\\u20D0-\\u20FF\\uFE20-\\uFE2F";
@@ -32,14 +32,14 @@ function isEmojiPart(cp: number | undefined): boolean {
   );
 }
 
-/** Drops ZWJ unless it glues two emoji together (👩‍🏫, ❤️‍🔥). */
+/** Drops ZWJ unless it glues two emoji together (👩\u200D🏫, ❤\uFE0F\u200D🔥). */
 function stripStrayZwj(s: string): string {
-  if (!s.includes("‍")) return s;
+  if (!s.includes("\u200D")) return s;
   const cps = Array.from(s);
   let out = "";
   for (let i = 0; i < cps.length; i++) {
     const ch = cps[i];
-    if (ch === "‍") {
+    if (ch === "\u200D") {
       if (isEmojiPart(cps[i - 1]?.codePointAt(0)) && isEmojiPart(cps[i + 1]?.codePointAt(0))) {
         out += ch;
       }
@@ -74,51 +74,30 @@ export function cleanInput(s: string, opts: { multiline?: boolean } = {}): strin
 
 // Letter variants → one canonical letter. Hamza-carrying letters (أ إ آ ؤ ئ)
 // lose their hamza when the combining marks are stripped after NFKD.
-const LETTER_MAP: Record<string, string> = {
-  "ٱ": "ا", // ٱ wasla
-  "ٲ": "ا",
-  "ٳ": "ا",
-  "ٵ": "ا",
-  "ى": "ي", // ى
-  "ی": "ي", // Persian ی
-  "ې": "ي",
-  "ے": "ي",
-  "ة": "ه", // ة
-  "ۀ": "ه",
-  "ہ": "ه",
-  "ۃ": "ه",
-  "ھ": "ه",
-  "ە": "ه",
-  "ک": "ك", // Persian ک
-  "ڪ": "ك",
-  "چ": "ك", // چ (Najdi ch for ك)
-  "گ": "ق", // گ (Gulf/Iraqi g for ق)
-  "ڨ": "ق",
-  "ٯ": "ق",
-  "ڤ": "ف", // ڤ
-  "ڥ": "ف",
-  "ڡ": "ف",
-  "پ": "ب", // پ
-  "ٮ": "ب",
-  "ژ": "ز", // ژ
-  "ٹ": "ت",
-  "ٺ": "ت",
-  "ڈ": "د",
-  "ڑ": "ر",
-  "ڕ": "ر",
-  "ں": "ن",
-  "ڵ": "ل",
-  "ۆ": "و",
-  "ۇ": "و",
-  "ۈ": "و",
-  "ۋ": "و",
-};
+const LETTER_GROUPS: Array<[canonical: string, variants: string]> = [
+  ["ا", "ٱٲٳٵ"], // wasla + alef variants
+  ["ي", "ىیېے"], // ى, Persian/Urdu yeh
+  ["ه", "ةۀہۃھە"], // ة and heh variants
+  ["ك", "کڪچ"], // Persian ک, Najdi چ
+  ["ق", "گڨٯ"], // Gulf/Iraqi گ (g)
+  ["ف", "ڤڥڡ"], // ڤ (v)
+  ["ب", "پٮ"], // پ (p)
+  ["ز", "ژ"],
+  ["ت", "ٹٺ"],
+  ["د", "ڈ"],
+  ["ر", "ڑڕ"],
+  ["ن", "ں"],
+  ["ل", "ڵ"],
+  ["و", "ۆۇۈۋ"],
+];
+const LETTER_MAP: Record<string, string> = {};
+for (const [canonical, variants] of LETTER_GROUPS) for (const v of variants) LETTER_MAP[v] = canonical;
 const LETTER_RE = new RegExp(`[${Object.keys(LETTER_MAP).join("")}]`, "g");
-const TATWEEL_AND_VS = /[ـ︀-️]/g;
+const TATWEEL_AND_VS = /[\u0640\uFE00-\uFE0F]/g;
 
 /** Arabic-Indic (٠-٩) and Persian (۰-۹) digits → ASCII. */
 export function asciiDigits(s: string): string {
-  return s.replace(/[٠-٩۰-۹]/g, (d) => {
+  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => {
     const c = d.charCodeAt(0);
     return String(c >= 0x06f0 ? c - 0x06f0 : c - 0x0660);
   });
@@ -132,7 +111,7 @@ export function asciiDigits(s: string): string {
 export function foldText(s: string): string {
   let t = String(s ?? "").normalize("NFKD").toLowerCase();
   t = t.replace(MARKS, "").normalize("NFC");
-  t = t.replace(INVISIBLE, "").replace(/‍/g, "").replace(TATWEEL_AND_VS, "");
+  t = t.replace(INVISIBLE, "").replace(/\u200D/g, "").replace(TATWEEL_AND_VS, "");
   t = t.replace(LETTER_RE, (c) => LETTER_MAP[c] ?? c);
   return asciiDigits(t);
 }

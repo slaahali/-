@@ -32,7 +32,9 @@ describe("db schema", () => {
     ]) {
       expect(alter!.sql).toMatch(new RegExp(`ADD COLUMN IF NOT EXISTS ${col}\\b`));
     }
-    expect(SCHEMA_SQL).toMatch(/ALTER TABLE message_reports ADD COLUMN IF NOT EXISTS note\b/);
+    const reports = schemaStatements().find((s) => /^ALTER TABLE message_reports\s+ADD COLUMN/i.test(s.sql));
+    expect(reports?.sql).toMatch(/ADD COLUMN IF NOT EXISTS reason\b/);
+    expect(reports?.sql).toMatch(/ADD COLUMN IF NOT EXISTS note\b/);
     expect(SCHEMA_SQL).toMatch(/CHECK \(status IN \('published', 'pending', 'hidden'\)\)/);
   });
 

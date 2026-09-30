@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { fetchMessage, likeMessage } from "@/lib/api-client";
@@ -84,6 +85,42 @@ function writeLiked(s: Set<string>) {
   }
 }
 
+/** Liked ids live in localStorage; the server (and first client render) sees none. */
+const EMPTY_LIKED: ReadonlySet<string> = new Set();
+let likedSnapshot: ReadonlySet<string> | null = null;
+const likedListeners = new Set<() => void>();
+
+const likedStore = {
+  subscribe(fn: () => void) {
+    likedListeners.add(fn);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== LIKED_KEY) return;
+      likedSnapshot = null; // another tab changed it
+      fn();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      likedListeners.delete(fn);
+      window.removeEventListener("storage", onStorage);
+    };
+  },
+  get(): ReadonlySet<string> {
+    if (!likedSnapshot) likedSnapshot = readLiked();
+    return likedSnapshot;
+  },
+  getServer(): ReadonlySet<string> {
+    return EMPTY_LIKED;
+  },
+  update(id: string, isLiked: boolean) {
+    const next = new Set(likedStore.get());
+    if (isLiked) next.add(id);
+    else next.delete(id);
+    likedSnapshot = next;
+    writeLiked(next);
+    for (const l of likedListeners) l();
+  },
+};
+
 export function LettersProvider({
   children,
   initialTotal,
@@ -99,7 +136,7 @@ export function LettersProvider({
   const [total, setTotal] = useState(initialTotal);
   const [openMessage, setOpenMessage] = useState<PublicMessage | null>(initialOpen);
   const [wallOrder, setWallOrderState] = useState<string[]>([]);
-  const [liked, setLiked] = useState<Set<string>>(() => new Set());
+  const liked = useSyncExternalStore(likedStore.subscribe, likedStore.get, likedStore.getServer);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [prefill, setPrefill] = useState<{ toName: string; nonce: number } | null>(null);
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -111,11 +148,10 @@ export function LettersProvider({
   const pushedRef = useRef(false);
   const openReq = useRef(0);
 
-  // Seed cache + restore likes after mount (localStorage is client-only).
+  // Seed the lookup cache with what the server rendered.
   useEffect(() => {
     for (const m of initialMessages) cache.current.set(m.id, m);
     if (initialOpen) cache.current.set(initialOpen.id, initialOpen);
-    setLiked(readLiked());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -238,26 +274,18 @@ export function LettersProvider({
     [counts],
   );
 
-  const likedRef = useRef(liked);
   const countsRef = useRef(counts);
   useEffect(() => {
-    likedRef.current = liked;
     countsRef.current = counts;
-  }, [liked, counts]);
+  }, [counts]);
 
   const toggleLike = useCallback(async (m: PublicMessage) => {
-    const wasLiked = likedRef.current.has(m.id);
+    const wasLiked = likedStore.get().has(m.id);
     const before = countsRef.current[m.id] ?? m.likes;
     const nextLiked = !wasLiked;
 
     const apply = (isLikedNow: boolean, count: number) => {
-      setLiked((prev) => {
-        const s = new Set(prev);
-        if (isLikedNow) s.add(m.id);
-        else s.delete(m.id);
-        writeLiked(s);
-        return s;
-      });
+      likedStore.update(m.id, isLikedNow);
       setCounts((c) => ({ ...c, [m.id]: Math.max(0, count) }));
     };
 
