@@ -45,6 +45,7 @@ const jobs = [
     url: `${manifest.cdn}/${icon.remote}`,
     out: path.join(root, "public/3d", `${name}.webp`),
     size: 640,
+    alphaFloor: icon.alphaFloor ?? 0,
   })),
   ...Object.entries(manifest.seals ?? {}).map(([key, file]) => ({
     label: `seal ${key}`,
@@ -72,7 +73,14 @@ for (const job of jobs) {
   try {
     const buf = await download(job.url);
     if (job.size) {
-      await sharp(buf)
+      let img = sharp(buf);
+      if (job.alphaFloor) {
+        // Some renders carry a faint full-frame haze: drop near-transparent pixels.
+        const { data, info } = await img.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        for (let i = 3; i < data.length; i += 4) if (data[i] < job.alphaFloor) data[i] = 0;
+        img = sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } });
+      }
+      await img
         .resize(job.size, job.size, { fit: "inside", withoutEnlargement: true })
         .webp({ quality: 86, alphaQuality: 90, effort: 6 })
         .toFile(job.out);

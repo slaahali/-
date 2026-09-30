@@ -35,7 +35,8 @@
     },
     "envelope": {
       "remote": "hf_20260930_105004_d8c423cd-4a8b-45db-b8aa-f3877411dd7b.png",
-      "alt": "ظرف مفتوح تطير منه الرسائل"
+      "alt": "ظرف مفتوح تطير منه الرسائل",
+      "alphaFloor": 48
     }
   },
   "seals": {
@@ -48,7 +49,7 @@
     "memory": "hf_20260930_105005_6083425d-4232-443f-a9bd-781aac8f8a78.png"
   },
   "sfx": {
-    "_note": "ElevenLabs SFX generated via the Design connector. Signed URLs expire ~2026-10-04; re-download before then (npm run assets) and commit public/sfx.",
+    "_note": "ElevenLabs SFX generated via the Design connector. The committed files in public/sfx are loudness-normalized (ffmpeg); don't re-download with --force. Signed URLs expire ~2026-10-04.",
     "letter-open": "https://pikaso.cdnpk.net/private/production/5595335914/a2de8103-20ab-44b8-9192-1158609fd831.mp3?token=exp=1791072000~hmac=e38726d3a4a5a0a94c82533541025d77a53b602a7087ffeaece95a05acdf9359",
     "chime": "https://pikaso.cdnpk.net/private/production/5595336347/a2de8105-2cd4-46d7-bf05-f18354ef23b9.mp3?token=exp=1791072000~hmac=01e43a5deaa31848d9440f4b2870b40c604ca4c9fb6351ed2946195fe9518f9f",
     "whoosh": "https://pikaso.cdnpk.net/private/production/5595336431/a2de8107-2809-4825-b68c-f8fe4cd140e6.mp3?token=exp=1791072000~hmac=4f7675486277a774bdf35377fd34724649bf3d0732ddc09f265e7e8eb1db7c10"
