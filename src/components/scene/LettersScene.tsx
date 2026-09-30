@@ -9,6 +9,8 @@ export type LettersSceneProps = {
   letters: SceneLetter[];
   /** Click/tap on a real letter. */
   onOpen: (id: string) => void;
+  /** Stop the render loop, e.g. while the letter view covers the hero. */
+  paused?: boolean;
   className?: string;
 };
 
@@ -19,7 +21,7 @@ const POSITIONED = /(^|\s)(absolute|fixed|relative|sticky)(\s|$)/;
  * the wall below is the accessible way to reach every letter. Also flies in
  * letters announced with NEW_LETTER_EVENT. Renders an empty box without WebGL.
  */
-export default function LettersScene({ letters, onOpen, className }: LettersSceneProps) {
+export default function LettersScene({ letters, onOpen, paused = false, className }: LettersSceneProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
@@ -52,6 +54,10 @@ export default function LettersScene({ letters, onOpen, className }: LettersScen
   useEffect(() => {
     engineRef.current?.setLetters(letters);
   }, [letters]);
+
+  useEffect(() => {
+    engineRef.current?.setPaused(paused);
+  }, [paused]);
 
   const cls = ["overflow-hidden", POSITIONED.test(className ?? "") ? "" : "relative", className]
     .filter(Boolean)

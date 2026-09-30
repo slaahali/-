@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/og": ["./assets/fonts/**/*"],
     "/api/og/[id]": ["./assets/fonts/**/*"],
+    "/api/og/search": ["./assets/fonts/**/*"],
   },
   async headers() {
     return [

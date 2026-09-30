@@ -128,7 +128,8 @@ function cacheKey(input: OgInput): string {
     const m = input.m;
     return `l:${m.id}:${fnv1a([m.title, m.toName, m.school, m.body, m.fromName, m.variant, m.inMemory].join("\u0001"))}`;
   }
-  if (input.kind === "search") return `s:${input.total}:${input.q}`;
+  // The invitation never shows q, so every no-result search shares one entry.
+  if (input.kind === "search") return input.total >= 1 ? `s:${Math.trunc(input.total)}:${input.q}` : "s:0";
   return "d";
 }
 
@@ -155,7 +156,9 @@ export function renderOgPng(input: OgInput): Promise<Buffer> {
   return png;
 }
 
-export const OG_CACHE_CONTROL = "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400";
+// Short CDN life: a letter that gets hidden (removal request / moderator) should
+// stop unfurling within minutes, not hours.
+export const OG_CACHE_CONTROL = "public, max-age=300, s-maxage=600, stale-while-revalidate=300";
 
 /** PNG response with the shared cache headers. */
 export function ogResponse(png: Buffer): Response {

@@ -62,4 +62,10 @@ describe("renderOgPng", () => {
     expect(a).toBe(b);
     await a;
   });
+  it("shares one cache entry for every no-result search (q is never drawn there)", async () => {
+    const a = renderOgPng({ kind: "search", q: "أي شي", total: 0 });
+    const b = renderOgPng({ kind: "search", q: "شي ثاني", total: 0 });
+    expect(a).toBe(b);
+    await a;
+  });
 });

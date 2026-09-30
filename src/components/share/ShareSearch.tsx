@@ -59,7 +59,7 @@ export function ShareSearch({ q, count, className = "" }: { q: string; count: nu
         type="button"
         className={`${PILL} ${className}`}
         aria-haspopup={canNative ? undefined : "dialog"}
-        aria-expanded={canNative ? undefined : open}
+        aria-expanded={canNative && !open ? undefined : open}
         aria-controls={open ? panelId : undefined}
         onClick={onTrigger}
       >

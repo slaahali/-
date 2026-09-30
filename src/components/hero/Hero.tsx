@@ -40,7 +40,7 @@ const TITLE_START = TITLE_WORDS.join(" ");
 const fade = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
 export function Hero({ letters }: { letters: PublicMessage[] }) {
-  const { total, openLetter, hiddenIds } = useLetters();
+  const { total, openLetter, hiddenIds, openMessage } = useLetters();
   const sceneLetters = useMemo(
     () =>
       letters
@@ -83,7 +83,12 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
       </div>
 
       <div className="absolute inset-0">
-        <LettersScene letters={sceneLetters} onOpen={openLetter} className="h-full w-full" />
+        <LettersScene
+          letters={sceneLetters}
+          onOpen={openLetter}
+          paused={openMessage !== null}
+          className="h-full w-full"
+        />
       </div>
 
       {/* Foreground: the wrapper ignores the pointer so floating letters stay hoverable. */}

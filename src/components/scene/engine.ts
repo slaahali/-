@@ -881,9 +881,24 @@ export class LettersEngine {
 
   // --------------------------------------------------------------- loop ---
 
+  /** Stop rendering while something covers the hero (e.g. the letter view). */
+  setPaused(paused: boolean) {
+    if (this.paused === paused) return;
+    this.paused = paused;
+    if (paused) this.labelPill.dataset.visible = "false";
+    this.updateRunning();
+  }
+
+  private paused = false;
+
   private updateRunning() {
     const should =
-      this.ready && !this.disposed && this.pageVisible && this.intersecting && !this.contextLost;
+      this.ready &&
+      !this.disposed &&
+      !this.paused &&
+      this.pageVisible &&
+      this.intersecting &&
+      !this.contextLost;
     if (should && !this.raf) {
       this.last = performance.now();
       this.raf = requestAnimationFrame(this.tick);

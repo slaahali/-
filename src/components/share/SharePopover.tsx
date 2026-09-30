@@ -76,6 +76,7 @@ export function SharePopover(props: SharePopoverProps) {
 
 function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverProps, "open">) {
   const [sheet] = useState(() => !window.matchMedia("(min-width: 640px)").matches);
+  const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -163,7 +164,9 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
       }
     };
     const onPointerDown = (e: PointerEvent) => {
-      if (inside(e.target)) return;
+      // The sheet's backdrop closes on click: closing on pointerdown would remove
+      // it mid-tap and the click would land on the card underneath.
+      if (inside(e.target) || (e.target instanceof Node && rootRef.current?.contains(e.target))) return;
       // Clicking something focusable lets the browser move focus there.
       const focusable = e.target instanceof Element && e.target.closest("a, button, input, textarea, select, [tabindex]");
       onCloseRef.current({ restoreFocus: !focusable });
@@ -203,7 +206,7 @@ function Panel({ anchorRef, onClose, id, label, children }: Omit<SharePopoverPro
 
   if (sheet) {
     return (
-      <div className="fixed inset-0 z-[90]" onClick={stop} onKeyDown={onKeyDown}>
+      <div ref={rootRef} className="fixed inset-0 z-[90]" onClick={stop} onKeyDown={onKeyDown}>
         <div
           ref={backdropRef}
           aria-hidden="true"
