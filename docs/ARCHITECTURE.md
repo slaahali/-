@@ -78,6 +78,11 @@ Same mechanics, but **light, warm and practical**, in The Chefz identity:
 - **Security.** Never `dangerouslySetInnerHTML` user text. Render user text as
   React text with `white-space: pre-line`. Public API responses only ever contain
   `PublicMessage`.
+- **Canvas text.** `next/font/local` gives fonts hashed family names. To draw
+  with them on a `<canvas>`, read the family list from the CSS variables:
+  `getComputedStyle(document.documentElement).getPropertyValue("--font-ruqaa")`
+  (and `--font-plex`), then `await document.fonts.load(\`700 48px ${family}\`)`
+  before drawing. Set `ctx.direction = "rtl"` for Arabic.
 - **Performance.** The three.js scene is lazy-loaded client-only
   (`next/dynamic` with `ssr:false`), capped DPR, fewer letters on mobile, paused
   when off-screen or tab hidden. No other heavy client deps.
@@ -90,7 +95,8 @@ Same mechanics, but **light, warm and practical**, in The Chefz identity:
 |---|---|
 | `src/lib/types.ts` | `PublicMessage`, `MessageRecord`, `CreateMessageInput`, `CreateMessageBody`, `ListQuery`, `ListResult`, `LikeResult`, `ApiError`, `Field`, `LIMITS`, `TEACHER_TITLES`, `VARIANT_COUNT`, HTTP API table |
 | `src/lib/config.ts` | `SITE_URL`, `GIFT_URL`, `BRAND_URL`, `HASHTAG`, `permalink(id)`, **all copy** in `COPY` |
-| `src/lib/assets.ts` | `ICONS` manifest (local + remote URL), `VARIANTS` |
+| `src/lib/assets.ts` | `ICONS` manifest (local + remote URL, from `icons.json`), `VARIANTS`, `variantOf(v)` |
+| `scripts/fetch-assets.mjs` | `npm run assets`: downloads the 3D icons to `public/3d/*.webp` |
 | `src/lib/events.ts` | `SceneLetter`, `NEW_LETTER_EVENT`, `emitNewLetter()` |
 | `src/lib/format.ts` | `displayTo`, `toLine`, `fromName`, `formatCount`, `timeAgo`, `excerpt`, `toSceneLetter` |
 | `src/lib/api-client.ts` | browser fetch wrappers: `fetchMessages`, `fetchMessage`, `createMessage`, `likeMessage`, `reportMessage` |
@@ -157,8 +163,7 @@ export function getStore(): MessageStore; // Postgres when DATABASE_URL, else JS
 
 **ui-shell** — `src/app/page.tsx`, `src/app/m/**`, `src/app/not-found.tsx`,
 `src/components/CampaignPage.tsx`, `src/components/layout/**`,
-`src/components/hero/**`, `src/components/write/**`, `scripts/fetch-assets.mjs`,
-`public/brand/**`.
+`src/components/hero/**`, `src/components/write/**`, `public/brand/**`.
 
 **ui-wall** — `src/components/wall/**`, `src/components/letter/**`,
 `src/components/ui/LikeButton.tsx`, `src/components/ui/ReportButton.tsx`.

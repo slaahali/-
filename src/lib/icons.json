@@ -1,0 +1,13 @@
+{
+  "cdn": "https://d8j0ntlcm91z4.cloudfront.net/user_3H2FUBuaLYj4PmwIIh8f6C0pLc8",
+  "icons": {
+    "letter": { "remote": "hf_20260930_082403_b34cf60d-9f69-4033-bf5b-031d27cc0454.png", "alt": "رسالة مطوية بختم قلب" },
+    "gift": { "remote": "hf_20260930_082403_1b2361bf-042e-4ae5-a026-bb83dab55f75.png", "alt": "صندوق هدية" },
+    "books": { "remote": "hf_20260930_082403_d6fe3a2d-7e6a-4ef5-99a3-06026d4964f0.png", "alt": "كتب وتفاحة" },
+    "pencil": { "remote": "hf_20260930_082403_802b92e3-cc7f-4445-bb93-5166487c6553.png", "alt": "قلم رصاص" },
+    "cap": { "remote": "hf_20260930_082403_a8412b09-2ace-4e78-89d0-8badee638f8a.png", "alt": "قبعة تخرج" },
+    "plane": { "remote": "hf_20260930_082403_e377cf65-5bb7-4b23-b848-a74f164aad6b.png", "alt": "طيارة ورقية" },
+    "search": { "remote": "hf_20260930_082403_7ffb4a3f-bd98-4590-810a-67bfb9f5073f.png", "alt": "عدسة بحث" },
+    "heart": { "remote": "hf_20260930_082403_a7a13425-050d-4bfc-b2ea-c1a30907b35c.png", "alt": "قلب مع رسالة" }
+  }
+}
