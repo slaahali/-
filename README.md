@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# رسائل يوم المعلم · ذا شفز
 
-## Getting Started
+<div dir="rtl">
 
-First, run the development server:
+موقع حملة يوم المعلم (٥ أكتوبر): يكتب الزائر رسالة شكر لمعلّم أثّر فيه، وتطير الرسالة مع باقي الرسائل في مشهد ثلاثي الأبعاد، وتنعرض في حائط رسائل قابل للبحث والمشاركة.
+
+## وش فيه
+
+- **الرسائل الطايرة**: أحدث ٤٠ رسالة تطير في أعلى الصفحة، وزر «تجوّل بين كل الرسائل» يفتح نفقاً لا ينتهي يمر على كل الرسائل.
+- **فتح الرسالة**: ظرف بلون الكاتب، ختم شمع ينكسر، طابع بريد مع ختم التاريخ، وصوت عند الفتح. الجوال هو الأساس: شاشة كاملة، شريط أزرار سفلي، وسحب للتنقل أو الإغلاق.
+- **كتابة الرسالة**: إلى (اللقب + الاسم)، المدرسة أو الجامعة (اختياري)، نص الرسالة، اسم الكاتب، لون الظرف، خيار «في ذكرى»، وموافقة اختيارية على التواصل لو انختارت الرسالة.
+- **الحائط**: بحث بالاسم أو المدرسة، رابط قابل للمشاركة لكل نتيجة بحث ولكل رسالة، صورة ستوري جاهزة، إعجاب، ودعوة للكتابة لما ما تلقى اسمك.
+- **الحماية**: فلتر كلمات عربي يتعامل مع التحايل (تكرار الحروف، الرموز، الأرقام)، ومنع الروابط وأرقام التواصل، وطبقة ذكاء اصطناعي اختيارية، ومراجعة بشرية، وحد يومي للإرسال، و«إبلاغ / طلب حذف» للشخص المذكور.
+- **لوحة الإدارة** `/admin`: مراجعة الرسائل المعلّقة، الإخفاء والنشر، تمييز الرسائل للمحتوى المفاجئ، وتصدير المميزة أو الموافقين على التواصل كملف CSV.
+
+## التشغيل محلياً
+
+</div>
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # SEED_DEMO=true يعبّي رسائل تجريبية
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+<div dir="rtl">
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+بدون قاعدة بيانات، الرسائل تنحفظ في ملف محلي داخل `.data/` (للتطوير فقط).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+فحوصات قبل أي رفع:
 
-## Learn More
+</div>
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run typecheck && npm run lint && npm test && npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+<div dir="rtl">
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## النشر على Vercel
 
-## Deploy on Vercel
+1. اربط المستودع بمشروع Vercel جديد.
+2. أضف قاعدة Postgres (مثلاً Neon من تبويب Storage)، واستخدم الرابط **المجمّع (pooled)** في `DATABASE_URL`، والرابط المباشر في `DATABASE_URL_UNPOOLED`.
+3. عبّئ المتغيرات تحت (على الأقل: `NEXT_PUBLIC_SITE_URL` و`IP_HASH_SALT` و`ADMIN_TOKEN`).
+4. Vercel يشغّل `npm run vercel-build` تلقائياً: يحدّث جداول القاعدة ثم يبني الموقع.
+5. بعد ربط الدومين، غيّر `NEXT_PUBLIC_SITE_URL` للدومين النهائي وأعد النشر (القيمة تدخل وقت البناء).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## المتغيرات
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+الشرح الكامل لكل متغير في `.env.example`. أهمها:
+
+</div>
+
+| المتغير | الغرض |
+|---|---|
+| `NEXT_PUBLIC_SITE_URL` | رابط الحملة النهائي (روابط المشاركة وصور المعاينة) |
+| `NEXT_PUBLIC_GIFT_URL` | صفحة الهدايا في ذا شفز (تُضاف لها UTM تلقائياً) |
+| `DATABASE_URL` / `DATABASE_URL_UNPOOLED` | Postgres: المجمّع للموقع، والمباشر لتحديث الجداول |
+| `PG_POOL_MAX` | عدد الاتصالات لكل نسخة (الافتراضي ٢ على Vercel) |
+| `IP_HASH_SALT` | نص عشوائي طويل لتشفير عناوين IP |
+| `TRUSTED_PROXY_HOPS` / `CLIENT_IP_HEADER` | كيف نعرف IP الزائر خلف البروكسي (Vercel: القيمة ١) |
+| `ADMIN_TOKEN` | كلمة دخول لوحة الإدارة (فارغ = اللوحة مقفلة) |
+| `MODERATION_MODE` | `auto` أو `review_suspicious` (الافتراضي) أو `review_all` |
+| `SUBMIT_LIMIT_PER_DAY` | عدد الرسائل لكل جهاز في اليوم (١ = رسالة واحدة يومياً) |
+| `REPORT_HIDE_THRESHOLD` | عدد البلاغات اللي تخفي الرسالة للمراجعة |
+| `ANTHROPIC_API_KEY` / `MODERATION_AI` | طبقة الفلترة بالذكاء الاصطناعي (اختيارية) |
+| `READ_CACHE_TTL_MS` | كاش قصير للقراءة وقت الضغط العالي (الافتراضي ٥ ثوانٍ) |
+| `ALLOW_FILE_STORE` / `SEED_DEMO` | للتجارب فقط: تخزين مؤقت بدون قاعدة بيانات |
+
+<div dir="rtl">
+
+## الصور والأصوات
+
+الأيقونات ثلاثية الأبعاد وأختام الشمع (مولّدة على Higgsfield) والأصوات موجودة في `public/3d` و`public/seals` و`public/sfx`، ومصدرها مسجّل في `src/lib/icons.json`. لو احتجت تنزيلها من جديد:
+
+</div>
+
+```bash
+NODE_USE_ENV_PROXY=1 npm run assets   # ينزّل الناقص فقط، و --force يعيد تنزيل الكل
+```
+
+<div dir="rtl">
+
+لو ما توفرت الملفات، الموقع يستخدم رسومات SVG بديلة وأصوات مولّدة في المتصفح.
+
+## الخط والشعار
+
+- خط **ملهم** (`src/fonts/Molhim-*.woff2`) لكل الموقع، وخط IBM Plex Sans Arabic احتياطي للحروف اللاتينية والرموز اللي ما يغطيها ملهم. خط Aref Ruqaa للتوقيع والختم فقط.
+- ملف الخط يحمل ملاحظة «Please do not sell or redistribute»: **تأكدوا من رخصة استخدامه على الويب** قبل الإطلاق.
+- الشعار الرسمي: `public/brand/thechefz-logo.webp`، ونسخة PNG لصور المعاينة في `assets/`.
+
+## لوحة الإدارة
+
+افتح `/admin` وادخل قيمة `ADMIN_TOKEN`. التبويبات: بانتظار المراجعة، مُبلّغ عنها، طلبات حذف، مميزة، مرشحة للمفاجأة، منشورة، مخفية، الكل. التصدير (CSV) متاح للمميزة وللمرشحة للمفاجأة، وبيانات التواصل ما تظهر في أي مكان عام.
+
+## للمطورين
+
+- معمارية النظام والعقود بين الأجزاء: `docs/ARCHITECTURE.md`
+- ملاحظات الجولة الثانية من التصميم: `docs/V2.md`
+
+</div>
