@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { isValidId } from "@/lib/ids";
-import { jsonNoStore, logError, notFound, serverError } from "@/lib/request";
+import { jsonNoStore, notFound, storeFailure } from "@/lib/request";
 import { getStore } from "@/lib/store";
 import { toPublic } from "@/lib/store/shared";
 
@@ -13,7 +13,6 @@ export async function GET(_req: NextRequest, ctx: RouteContext<"/api/messages/[i
     const message = await getStore().get(id);
     return message ? jsonNoStore({ message: toPublic(message) }) : notFound();
   } catch (e) {
-    logError("[api] get message failed", e);
-    return serverError();
+    return storeFailure("[api] get message failed", e);
   }
 }

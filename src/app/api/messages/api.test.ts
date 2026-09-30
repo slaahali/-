@@ -57,6 +57,10 @@ beforeEach(() => {
   vi.stubEnv("IP_HASH_SALT", "test-salt");
   vi.stubEnv("MODERATION_MODE", "");
   vi.stubEnv("SUBMIT_LIMIT_PER_DAY", "");
+  vi.stubEnv("VERCEL", "");
+  vi.stubEnv("ALLOW_FILE_STORE", "");
+  vi.stubEnv("TRUSTED_PROXY_HOPS", "");
+  vi.stubEnv("CLIENT_IP_HEADER", "");
   mod.verdict = {};
   mod.seen = [];
   ip = `10.0.0.${++ipCounter}`;
@@ -207,6 +211,13 @@ describe("public API", () => {
     expect(sixth.json.error).toBe("rate_limited");
   });
 
+  it("a spoofed first X-Forwarded-For hop doesn't buy a new identity", async () => {
+    const spoofed = (i: number) =>
+      create(request("/api/messages", { body: letter, headers: { "x-forwarded-for": `203.0.113.${i}, ${ip}` } }));
+    for (let i = 0; i < 5; i++) expect((await spoofed(i)).status).toBe(201);
+    expect((await spoofed(99)).status).toBe(429);
+  });
+
   it("likes once per device", async () => {
     const { json } = await post(letter);
     const id = json.message.id;
@@ -225,14 +236,23 @@ describe("public API", () => {
     expect((await like(request(`/api/messages/x/like`, { body: { like: true } }), ctx({ id: "../x" }))).status).toBe(404);
   });
 
-  it("caps cookieless likes on one letter per IP", async () => {
+  it("counts one cookie-less like per letter per IP (the rest are acknowledged, not counted)", async () => {
     const { json } = await post(letter);
     const id = json.message.id;
     for (let i = 0; i < 10; i++) {
-      expect((await like(request(`/api/messages/${id}/like`, { body: { like: true } }), ctx({ id }))).status).toBe(200);
+      const res = await like(request(`/api/messages/${id}/like`, { body: { like: true } }), ctx({ id }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ likes: 1, liked: true });
+      expect(res.headers.get("set-cookie")).toMatch(/^tcz_vid=/);
     }
+    // In-memory flood guard on top.
     const eleventh = await like(request(`/api/messages/${id}/like`, { body: { like: true } }), ctx({ id }));
     expect(eleventh.status).toBe(429);
+    // A visitor whose browser kept the cookie still counts, on the same IP.
+    const other = await post(letter);
+    const cookie = cookieOf(other.res);
+    const counted = await like(request(`/api/messages/${id}/like`, { body: { like: true }, cookie }), ctx({ id }));
+    expect(await counted.json()).toEqual({ likes: 2, liked: true });
   });
 
   it("a removal request hides the letter at once", async () => {
@@ -249,8 +269,87 @@ describe("public API", () => {
     expect((await getOne(request(`/api/messages/${id}`), ctx({ id }))).status).toBe(404);
 
     const removal = await (await adminList(request("/api/admin/messages?filter=removal", { headers: admin }))).json();
-    expect(removal.items[0]).toMatchObject({ id, removalRequested: true, reviewReason: "removal_request" });
+    expect(removal.items[0]).toMatchObject({ id, removalRequested: true, reviewReason: "removal_request", removalKept: false });
+    expect(removal.items[0]).not.toHaveProperty("deviceHash");
     expect((await report(request(`/api/messages/zzzz0000/report`, { body: { reason: "other" } }), ctx({ id: "zzzz0000" }))).status).toBe(404);
+
+    // A moderator keeps it: later removal requests only flag it.
+    await adminPatch(request(`/api/admin/messages/${id}`, { method: "PATCH", body: { status: "published" }, headers: admin }), ctx({ id }));
+    ip = "10.1.1.1";
+    const again = await report(request(`/api/messages/${id}/report`, { body: { reason: "removal_request" } }), ctx({ id }));
+    expect(await again.json()).toEqual({ ok: true, hidden: false });
+    expect((await getOne(request(`/api/messages/${id}`), ctx({ id }))).status).toBe(200);
+    const flagged = await (await adminList(request("/api/admin/messages?filter=removal", { headers: admin }))).json();
+    expect(flagged.items[0]).toMatchObject({ id, status: "published", removalKept: true, reviewReason: "removal_request_again" });
+  });
+
+  it("cookie-less reports from one IP never add up to the hide threshold", async () => {
+    const { json } = await post(letter);
+    const id = json.message.id;
+    for (let i = 0; i < 5; i++) {
+      const res = await report(request(`/api/messages/${id}/report`, { body: { reason: "inappropriate" } }), ctx({ id }));
+      expect(await res.json()).toEqual({ ok: true, hidden: false });
+    }
+    expect((await getOne(request(`/api/messages/${id}`), ctx({ id }))).status).toBe(200);
+    const listed = await (await adminList(request("/api/admin/messages?filter=reported", { headers: admin }))).json();
+    expect(listed.items[0]).toMatchObject({ id, reports: 1, status: "published" });
+  });
+
+  it("caps removal requests per IP per day", async () => {
+    vi.stubEnv("MODERATION_MODE", "auto");
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      ip = `10.2.0.${i}`; // stay under the create burst limit
+      ids.push((await post(letter)).json.message.id);
+    }
+    ip = "10.3.0.1";
+    for (const id of ids.slice(0, 5)) {
+      const res = await report(request(`/api/messages/${id}/report`, { body: { reason: "removal_request" } }), ctx({ id }));
+      expect(await res.json()).toEqual({ ok: true, hidden: true });
+    }
+    const sixth = await report(request(`/api/messages/${ids[5]}/report`, { body: { reason: "removal_request" } }), ctx({ id: ids[5] }));
+    expect(sixth.status).toBe(429);
+    expect((await getOne(request(`/api/messages/${ids[5]}`), ctx({ id: ids[5] }))).status).toBe(200);
+  });
+
+  it("marks only short (index-less) search queries as briefly CDN-cacheable", async () => {
+    await post(letter);
+    const short = await list(request(`/api/messages?q=${encodeURIComponent("نو")}`));
+    expect(short.headers.get("cache-control")).toMatch(/s-maxage=30/);
+    const long = await list(request(`/api/messages?q=${encodeURIComponent("نورة")}`));
+    expect(long.headers.get("cache-control")).toBe("no-store");
+    expect((await list(request("/api/messages"))).headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("serverless deployment without a database", () => {
+  it("still renders reads, but every write answers 503 (no per-instance /tmp store)", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const listed = await list(request("/api/messages"));
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toEqual({ items: [], nextCursor: null, total: 0 });
+
+      const created = await post(letter);
+      expect(created.res.status).toBe(503);
+      expect(created.json).toMatchObject({ error: "server" });
+      expect(created.json.message).toBeTruthy();
+      expect(mod.seen).toHaveLength(0); // refused before moderation runs
+      const id = "abcd123456";
+      expect((await like(request(`/api/messages/${id}/like`, { body: { like: true } }), ctx({ id }))).status).toBe(503);
+      expect((await report(request(`/api/messages/${id}/report`, { body: { reason: "other" } }), ctx({ id }))).status).toBe(503);
+      expect((await adminList(request("/api/admin/messages", { headers: admin }))).status).toBe(503);
+      expect(spy.mock.calls.join(" ")).toMatch(/NO DATABASE CONFIGURED/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("keeps the zero-config demo when explicitly asked for", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("ALLOW_FILE_STORE", "1");
+    expect((await post(letter)).res.status).toBe(201);
   });
 });
 

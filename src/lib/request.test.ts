@@ -6,22 +6,78 @@ import {
   clampChars,
   deviceHash,
   getClientIp,
+  hashIp,
   hashValue,
+  ipFromForwardedFor,
+  ipKey,
   jsonNoStore,
+  normalizeIp,
   readDeviceId,
   readJsonBody,
+  serviceUnavailable,
+  storeFailure,
 } from "./request";
+import { StoreUnavailableError } from "./store/errors";
 
 const req = (headers: Record<string, string> = {}, body?: string) =>
   new Request("http://localhost/api/x", { method: body === undefined ? "GET" : "POST", headers, body });
 
 describe("getClientIp", () => {
-  it("prefers the first x-forwarded-for hop", () => {
-    expect(getClientIp(req({ "x-forwarded-for": "1.2.3.4, 10.0.0.1", "x-real-ip": "5.6.7.8" }))).toBe("1.2.3.4");
-    expect(getClientIp(req({ "x-real-ip": "5.6.7.8", "cf-connecting-ip": "9.9.9.9" }))).toBe("5.6.7.8");
-    expect(getClientIp(req({ "cf-connecting-ip": "9.9.9.9" }))).toBe("9.9.9.9");
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("never trusts the client-controlled first X-Forwarded-For hop (default: one proxy)", () => {
+    // The client sent "6.6.6.6"; our proxy appended the address it saw.
+    expect(getClientIp(req({ "x-forwarded-for": "6.6.6.6, 1.2.3.4" }))).toBe("1.2.3.4");
+    expect(getClientIp(req({ "x-forwarded-for": "1.2.3.4" }))).toBe("1.2.3.4");
+    // Unconfigured headers a client can simply send are ignored.
+    expect(getClientIp(req({ "x-real-ip": "5.6.7.8", "cf-connecting-ip": "9.9.9.9" }))).toBeNull();
     expect(getClientIp(req())).toBeNull();
     expect(getClientIp(req({ "x-forwarded-for": "x".repeat(200) }))).toBeNull();
+    expect(getClientIp(req({ "x-forwarded-for": "1.2.3.4, not-an-ip" }))).toBeNull();
+  });
+
+  it("honours TRUSTED_PROXY_HOPS", () => {
+    const xff = { "x-forwarded-for": "6.6.6.6, 1.2.3.4, 10.0.0.2" };
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "2");
+    expect(getClientIp(req(xff))).toBe("1.2.3.4");
+    // Fewer entries than hops: the leftmost is the best we have.
+    expect(getClientIp(req({ "x-forwarded-for": "1.2.3.4" }))).toBe("1.2.3.4");
+    vi.stubEnv("TRUSTED_PROXY_HOPS", "0");
+    expect(getClientIp(req(xff))).toBeNull();
+  });
+
+  it("uses CLIENT_IP_HEADER when configured (e.g. behind Cloudflare)", () => {
+    vi.stubEnv("CLIENT_IP_HEADER", "CF-Connecting-IP");
+    expect(getClientIp(req({ "cf-connecting-ip": "9.9.9.9", "x-forwarded-for": "6.6.6.6" }))).toBe("9.9.9.9");
+    expect(getClientIp(req({ "x-forwarded-for": "6.6.6.6" }))).toBeNull();
+  });
+
+  it("uses the headers Vercel's edge sets", () => {
+    vi.stubEnv("VERCEL", "1");
+    expect(getClientIp(req({ "x-vercel-forwarded-for": "7.7.7.7", "x-forwarded-for": "6.6.6.6, 7.7.7.7" }))).toBe("7.7.7.7");
+    expect(getClientIp(req({ "x-real-ip": "7.7.7.8" }))).toBe("7.7.7.8");
+    expect(getClientIp(req({ "x-forwarded-for": "7.7.7.9" }))).toBe("7.7.7.9");
+  });
+
+  it("normalises ports, brackets and IPv4-mapped IPv6", () => {
+    expect(normalizeIp("1.2.3.4:5678")).toBe("1.2.3.4");
+    expect(normalizeIp("[2001:DB8::1]:443")).toBe("2001:db8::1");
+    expect(normalizeIp("::ffff:1.2.3.4")).toBe("1.2.3.4");
+    expect(normalizeIp("unknown")).toBeNull();
+    expect(ipFromForwardedFor(" 1.1.1.1 ,2.2.2.2 ", 1)).toBe("2.2.2.2");
+  });
+
+  it("keys IPv6 clients by their /64 (addresses inside it are free to rotate)", () => {
+    expect(ipKey("1.2.3.4")).toBe("1.2.3.4");
+    expect(ipKey("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:db8:1:2:bbbb:cccc:dddd:eeee")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(ipKey("::1")).toBe("0:0:0:0::/64");
+    const a = hashIp(req({ "x-forwarded-for": "2001:db8:1:2::aaaa" }));
+    const b = hashIp(req({ "x-forwarded-for": "2001:db8:1:2::bbbb" }));
+    const c = hashIp(req({ "x-forwarded-for": "2001:db8:1:3::aaaa" }));
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
   });
 });
 
@@ -122,5 +178,21 @@ describe("rateLimit", () => {
     expect(rateLimit("key-11999", 1, 60_000).ok).toBe(false);
     // …the oldest were evicted.
     expect(rateLimit("key-0", 1, 60_000).ok).toBe(true);
+  });
+});
+
+describe("storeFailure", () => {
+  it("maps a missing database to 503 and anything else to 500", async () => {
+    const unavailable = storeFailure("[test]", new StoreUnavailableError());
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("retry-after")).toBeTruthy();
+    expect(await unavailable.json()).toMatchObject({ error: "server" });
+    expect(serviceUnavailable().headers.get("cache-control")).toBe("no-store");
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = storeFailure("[test]", Object.assign(new Error("boom"), { parameters: ["+966500000001"] }));
+    expect(failed.status).toBe(500);
+    expect(spy.mock.calls.join(" ")).not.toContain("966500000001");
+    spy.mockRestore();
   });
 });

@@ -6,7 +6,7 @@ import { messagesToCsv } from "./csv";
 import { DEMO_LETTERS } from "./demo-data";
 import { FileStore } from "./file-store";
 import { makeTestDir } from "./test-dirs";
-import type { NewMessage } from "./types";
+import type { NewMessage, ReportInput, Voter } from "./types";
 
 const root = makeTestDir("file-store-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -35,6 +35,20 @@ function input(over: Partial<NewMessage> = {}): NewMessage {
     ...over,
   };
 }
+
+const voter = (voterHash: string, ipHash: string | null = "ip-1", newDevice = false): Voter => ({
+  voterHash,
+  ipHash,
+  newDevice,
+});
+
+const rep = (
+  voterHash: string,
+  reason: ReportInput["reason"],
+  note: string | null = null,
+  ipHash: string | null = null,
+  newDevice = false,
+): ReportInput => ({ voterHash, ipHash, newDevice, reason, note });
 
 const PUBLIC_KEYS = [
   "body",
@@ -127,7 +141,7 @@ describe("FileStore", () => {
     const created: PublicMessage[] = [];
     for (let i = 0; i < 7; i++) created.push(await store.create(input({ toName: `معلم ${i}` })));
     for (const [i, m] of created.entries()) {
-      for (let v = 0; v < i % 4; v++) await store.toggleLike(m.id, `voter-${v}`, true);
+      for (let v = 0; v < i % 4; v++) await store.toggleLike(m.id, true, voter(`voter-${v}`));
     }
 
     const walk = async (sort: "new" | "top") => {
@@ -166,44 +180,87 @@ describe("FileStore", () => {
 
   it("likes are idempotent per voter and only for published letters", async () => {
     const m = await store.create(input());
-    expect(await store.toggleLike(m.id, "v1", true)).toEqual({ likes: 1, liked: true });
-    expect(await store.toggleLike(m.id, "v1", true)).toEqual({ likes: 1, liked: true });
-    expect(await store.toggleLike(m.id, "v2", true)).toEqual({ likes: 2, liked: true });
-    expect(await store.toggleLike(m.id, "v1", false)).toEqual({ likes: 1, liked: false });
-    expect(await store.toggleLike(m.id, "v1", false)).toEqual({ likes: 1, liked: false });
-    expect(await store.toggleLike("missing000", "v1", true)).toBeNull();
+    expect(await store.toggleLike(m.id, true, voter("v1"))).toEqual({ likes: 1, liked: true });
+    expect(await store.toggleLike(m.id, true, voter("v1"))).toEqual({ likes: 1, liked: true });
+    expect(await store.toggleLike(m.id, true, voter("v2"))).toEqual({ likes: 2, liked: true });
+    expect(await store.toggleLike(m.id, false, voter("v1"))).toEqual({ likes: 1, liked: false });
+    expect(await store.toggleLike(m.id, false, voter("v1"))).toEqual({ likes: 1, liked: false });
+    expect(await store.toggleLike("missing000", true, voter("v1"))).toBeNull();
 
     const pend = await store.create(input({ status: "pending" }));
-    expect(await store.toggleLike(pend.id, "v1", true)).toBeNull();
+    expect(await store.toggleLike(pend.id, true, voter("v1"))).toBeNull();
 
-    // Concurrent likes from many voters all count.
-    await Promise.all(Array.from({ length: 20 }, (_, i) => store.toggleLike(m.id, `c${i}`, true)));
+    // Concurrent likes from many voters (with cookies, same IP) all count.
+    await Promise.all(Array.from({ length: 20 }, (_, i) => store.toggleLike(m.id, true, voter(`c${i}`))));
     expect((await store.get(m.id))?.likes).toBe(21);
+  });
+
+  it("counts one cookie-less like per letter per IP per day (durably)", async () => {
+    const m = await store.create(input());
+    const other = await store.create(input());
+    expect(await store.toggleLike(m.id, true, voter("n1", "ip-x", true))).toEqual({ likes: 1, liked: true });
+    // Same IP, no cookie again: acknowledged, not counted.
+    expect(await store.toggleLike(m.id, true, voter("n2", "ip-x", true))).toEqual({ likes: 1, liked: true });
+    await Promise.all(Array.from({ length: 5 }, (_, i) => store.toggleLike(m.id, true, voter(`n${i + 3}`, "ip-x", true))));
+    expect((await store.get(m.id))?.likes).toBe(1);
+    // Other IPs, other letters, and devices with a cookie are unaffected.
+    expect(await store.toggleLike(m.id, true, voter("n9", "ip-y", true))).toEqual({ likes: 2, liked: true });
+    expect(await store.toggleLike(other.id, true, voter("n10", "ip-x", true))).toEqual({ likes: 1, liked: true });
+    expect(await store.toggleLike(m.id, true, voter("known", "ip-x"))).toEqual({ likes: 3, liked: true });
+
+    // Survives a restart (a new instance reading the same file).
+    const again = new FileStore({ dir, seedDemo: false });
+    expect(await again.toggleLike(m.id, true, voter("n11", "ip-x", true))).toEqual({ likes: 3, liked: true });
+    // …and expires after a day.
+    const file = path.join(dir, "letters.json");
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    raw.likeIps[m.id]["ip-x"] = new Date(Date.now() - 25 * 3600_000).toISOString();
+    writeFileSync(file, JSON.stringify(raw));
+    const later = new FileStore({ dir, seedDemo: false });
+    expect(await later.toggleLike(m.id, true, voter("n12", "ip-x", true))).toEqual({ likes: 4, liked: true });
   });
 
   it("hides a letter after REPORT_HIDE_THRESHOLD distinct reporters; a moderator re-publish sticks", async () => {
     const m = await store.create(input());
-    expect(await store.report(m.id, "r1", "inappropriate", null)).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r1", "inappropriate", "again")).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r2", "other", "ملاحظة")).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r3", "inappropriate", null)).toEqual({ hidden: true });
+    expect(await store.report(m.id, rep("r1", "inappropriate", null, "ip-1"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r1", "inappropriate", "again", "ip-1"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r2", "other", "ملاحظة", "ip-2"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r3", "inappropriate", null, "ip-3"))).toEqual({ hidden: true });
     expect(await store.get(m.id)).toBeNull();
 
     let row = (await store.adminList({ filter: "pending", limit: 10, offset: 0 })).items[0];
     expect(row).toMatchObject({ id: m.id, status: "pending", reports: 3, reviewReason: "reports", removalRequested: false });
 
     expect(await store.adminUpdate(m.id, { status: "published" })).toBe(true);
-    expect(await store.report(m.id, "r4", "inappropriate", null)).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r4", "inappropriate", null, "ip-4"))).toEqual({ hidden: false });
     row = (await store.adminList({ filter: "reported", limit: 10, offset: 0 })).items[0];
-    expect(row).toMatchObject({ status: "published", reports: 4, reviewReason: null });
-    expect(await store.report("missing000", "r1", "other", null)).toBeNull();
+    expect(row).toMatchObject({ status: "published", reports: 4, reviewReason: null, removalKept: false });
+    expect(await store.report("missing000", rep("r1", "other"))).toBeNull();
+  });
+
+  it("a reporter is a device OR an IP: cookie-less repeats from one IP never add up", async () => {
+    const m = await store.create(input());
+    for (let i = 0; i < 6; i++) {
+      expect(await store.report(m.id, rep(`fresh-${i}`, "inappropriate", null, "ip-attacker", true))).toEqual({ hidden: false });
+    }
+    // Another device behind the same IP doesn't count either; a new device + new IP does.
+    await store.report(m.id, rep("dev-2", "other", null, "ip-attacker"));
+    await store.report(m.id, rep("dev-3", "other", null, "ip-3"));
+    const [row] = (await store.adminList({ filter: "reported", limit: 5, offset: 0 })).items;
+    expect(row).toMatchObject({ id: m.id, reports: 2, status: "published" });
+    // Only the counted reports are stored.
+    const raw = JSON.parse(readFileSync(path.join(dir, "letters.json"), "utf8"));
+    expect(raw.reports[m.id]).toHaveLength(2);
+    // Unknown IP (no proxy header): the device is all we have.
+    await store.report(m.id, rep("dev-4", "other", null, null, true));
+    expect((await store.adminList({ filter: "reported", limit: 5, offset: 0 })).items[0]).toMatchObject({ reports: 3, status: "pending" });
   });
 
   it("a removal request hides the letter immediately for review", async () => {
     const m = await store.create(input());
-    expect(await store.report(m.id, "r1", "inappropriate", null)).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r1", "inappropriate", null, "ip-1"))).toEqual({ hidden: false });
     // Same reporter can still escalate to a removal request (once).
-    expect(await store.report(m.id, "r1", "removal_request", "أنا نورة")).toEqual({ hidden: true });
+    expect(await store.report(m.id, rep("r1", "removal_request", "أنا نورة", "ip-1"))).toEqual({ hidden: true });
     expect(await store.get(m.id)).toBeNull();
 
     const [row] = (await store.adminList({ filter: "removal", limit: 10, offset: 0 })).items;
@@ -213,20 +270,62 @@ describe("FileStore", () => {
       removalRequested: true,
       reviewReason: "removal_request",
       reports: 1,
+      removalKept: false,
     });
-
-    // Moderator decides to keep it: published again, removalRequested kept for audit.
-    await store.adminUpdate(m.id, { status: "published" });
-    expect(await store.report(m.id, "r1", "removal_request", null)).toEqual({ hidden: false });
-    const after = (await store.adminList({ filter: "all", q: m.id, limit: 10, offset: 0 })).items[0];
-    expect(after).toMatchObject({ status: "published", removalRequested: true, reviewReason: null });
+    expect(row.flaggedAt).toBeTruthy();
 
     // A hidden letter stays hidden but is flagged.
     const h = await store.create(input());
     await store.adminUpdate(h.id, { status: "hidden" });
-    expect(await store.report(h.id, "r9", "removal_request", null)).toEqual({ hidden: true });
+    expect(await store.report(h.id, rep("r9", "removal_request", null, "ip-9"))).toEqual({ hidden: true });
     const hidden = (await store.adminList({ filter: "hidden", limit: 10, offset: 0 })).items[0];
     expect(hidden).toMatchObject({ status: "hidden", removalRequested: true });
+  });
+
+  it("after a moderator keeps a letter, later removal requests only flag it", async () => {
+    const m = await store.create(input());
+    await store.report(m.id, rep("r1", "removal_request", null, "ip-1"));
+    // Moderator decides to keep it: published again, removalRequested kept for audit.
+    await store.adminUpdate(m.id, { status: "published" });
+    let row = (await store.adminList({ filter: "all", q: m.id, limit: 1, offset: 0 })).items[0];
+    expect(row).toMatchObject({ status: "published", removalRequested: true, removalKept: true, reviewReason: null });
+
+    // Same device or IP again: nothing changes.
+    expect(await store.report(m.id, rep("r1", "removal_request", null, "ip-1"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("fresh", "removal_request", null, "ip-1", true))).toEqual({ hidden: false });
+    row = (await store.adminList({ filter: "all", q: m.id, limit: 1, offset: 0 })).items[0];
+    expect(row.reviewReason).toBeNull();
+
+    // Someone else: stays public, flagged for another look and first in the removal tab.
+    const other = await store.create(input());
+    await store.report(other.id, rep("r7", "removal_request", null, "ip-7"));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await store.report(m.id, rep("r2", "removal_request", "مرة ثانية", "ip-2"))).toEqual({ hidden: false });
+    expect(await store.get(m.id)).not.toBeNull();
+    const removal = (await store.adminList({ filter: "removal", limit: 10, offset: 0 })).items;
+    expect(removal.map((x) => x.id)).toEqual([m.id, other.id]);
+    expect(removal[0]).toMatchObject({ status: "published", reviewReason: "removal_request_again" });
+
+    // "Keep" again clears the flag.
+    await store.adminUpdate(m.id, { status: "published" });
+    row = (await store.adminList({ filter: "all", q: m.id, limit: 1, offset: 0 })).items[0];
+    expect(row).toMatchObject({ status: "published", reviewReason: null, removalKept: true });
+  });
+
+  it("caps new removal requests per device and per IP per day", async () => {
+    const ids = await Promise.all(Array.from({ length: 8 }, () => store.create(input()).then((m) => m.id)));
+    // Per device: 3 a day.
+    for (const id of ids.slice(0, 3)) expect(await store.report(id, rep("dev-a", "removal_request", null, `ip-${id}`))).toEqual({ hidden: true });
+    expect(await store.report(ids[3], rep("dev-a", "removal_request", null, "ip-new"))).toEqual({ hidden: false, limited: true });
+    // Per IP (cookie-less, a new device each time): 5 a day.
+    for (const id of ids.slice(3, 8)) {
+      expect((await store.report(id, rep(`fresh-${id}`, "removal_request", null, "ip-b", true)))?.limited).toBeFalsy();
+    }
+    const extra = await store.create(input());
+    expect(await store.report(extra.id, rep("fresh-x", "removal_request", null, "ip-b", true))).toEqual({ hidden: false, limited: true });
+    expect(await store.get(extra.id)).not.toBeNull();
+    // Ordinary reports aren't capped this way.
+    expect(await store.report(extra.id, rep("fresh-y", "inappropriate", null, "ip-b", true))).toEqual({ hidden: false });
   });
 
   it("counts recent letters per IP / device", async () => {
@@ -250,7 +349,7 @@ describe("FileStore", () => {
     await store.adminUpdate(star.id, { starred: true });
     const hid = await store.create(input({ toName: "خامس" }));
     await store.adminUpdate(hid.id, { status: "hidden" });
-    await store.report(star.id, "r1", "other", null);
+    await store.report(star.id, rep("r1", "other"));
 
     const res = await store.adminList({ filter: "all", limit: 50, offset: 0 });
     expect(res.total).toBe(5);
@@ -362,6 +461,8 @@ describe("FileStore", () => {
       surpriseOptIn: false,
       contact: null,
       deviceHash: null,
+      removalKept: false,
+      flaggedAt: null,
     });
     const two = items.find((m) => m.id === "legacy0002")!;
     expect(two.title).toBeNull();
@@ -377,7 +478,8 @@ describe("FileStore", () => {
     expect(onDisk.version).toBe(2);
     expect(onDisk.messages).toHaveLength(2);
     expect(onDisk.likes.legacy0001).toEqual(["v1"]);
-    expect(onDisk.reports.legacy0001[0].reason).toBe("other");
+    expect(onDisk.reports.legacy0001[0]).toMatchObject({ reason: "other", ip: null });
+    expect(onDisk.likeIps).toEqual({});
   });
 
   it("moves a corrupt file aside and starts fresh", async () => {

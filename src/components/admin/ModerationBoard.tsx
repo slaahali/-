@@ -343,6 +343,8 @@ export function ModerationBoard({
 
   function changeStatus(m: AdminMessage, status: MessageStatus) {
     if (m.status !== status) void patchOne(m, { status }, DONE[status]);
+    // "Keep": re-publishing an already public letter clears a new removal-request flag.
+    else if (status === "published" && m.reviewReason) void patchOne(m, { status }, "أُبقيت الرسالة منشورة");
   }
 
   function toggleStar(m: AdminMessage) {

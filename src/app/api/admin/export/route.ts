@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
-import { badRequest, logError, serverError } from "@/lib/request";
+import { badRequest, storeFailure } from "@/lib/request";
 import { getStore } from "@/lib/store";
 import { messagesToCsv } from "@/lib/store/csv";
 import type { ExportFilter } from "@/lib/store/types";
@@ -29,7 +29,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e) {
-    logError("[api] admin export failed", e);
-    return serverError();
+    return storeFailure("[api] admin export failed", e);
   }
 }

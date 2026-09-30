@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
-import { clampChars, jsonNoStore, logError, serverError } from "@/lib/request";
+import { clampChars, jsonNoStore, storeFailure } from "@/lib/request";
 import { getStore } from "@/lib/store";
 import { MAX_ADMIN_PAGE_SIZE, clampOffset, isAdminFilter, toAdminItem } from "@/lib/store/shared";
 
@@ -31,7 +31,6 @@ export async function GET(req: NextRequest) {
     });
     return jsonNoStore({ items: items.map(toAdminItem), total, counts });
   } catch (e) {
-    logError("[api] admin list failed", e);
-    return serverError();
+    return storeFailure("[api] admin list failed", e);
   }
 }

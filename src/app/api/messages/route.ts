@@ -10,15 +10,15 @@ import {
   deviceHash,
   hashIp,
   jsonNoStore,
-  logError,
   rateLimited,
   readDeviceId,
   readJsonBody,
-  serverError,
+  storeFailure,
 } from "@/lib/request";
 import { getModerationMode, getSubmitLimitPerDay, type ModerationMode } from "@/lib/server-config";
 import { getStore } from "@/lib/store";
 import { toPublic } from "@/lib/store/shared";
+import { tokenizeQuery } from "@/lib/text/normalize";
 import type {
   CreateMessageResponse,
   ModerationRecord,
@@ -41,6 +41,18 @@ const BURST_LIMIT = 5;
 const BURST_WINDOW_MS = 10 * MINUTE;
 const IP_DAILY_LIMIT = 15;
 
+// Search-as-you-type sends 1–2 letter words that the trigram index can't serve
+// (each is a table scan). There are few such prefixes and a few seconds of
+// staleness is harmless mid-typing, so let the CDN absorb them. Longer queries
+// hit the index and stay fresh (a writer searching for the letter just sent).
+const SHORT_QUERY_CACHE = "public, max-age=0, s-maxage=30, stale-while-revalidate=60";
+const TRIGRAM = 3;
+
+function isShortQuery(q: string): boolean {
+  const tokens = tokenizeQuery(q);
+  return tokens.length > 0 && tokens.every((t) => [...t].length < TRIGRAM);
+}
+
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const q = normalizeQuery(sp.get("q"));
@@ -51,10 +63,11 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await getStore().list({ q: q || undefined, sort, cursor, limit });
-    return jsonNoStore(result);
+    return q && isShortQuery(q)
+      ? jsonNoStore(result, 200, { "Cache-Control": SHORT_QUERY_CACHE })
+      : jsonNoStore(result);
   } catch (e) {
-    logError("[api] list messages failed", e);
-    return serverError();
+    return storeFailure("[api] list messages failed", e);
   }
 }
 
@@ -141,7 +154,6 @@ export async function POST(req: NextRequest) {
     });
     return respond({ message: toPublic(message), status });
   } catch (e) {
-    logError("[api] create message failed", e);
-    return serverError();
+    return storeFailure("[api] create message failed", e);
   }
 }

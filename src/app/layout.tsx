@@ -3,9 +3,13 @@ import localFont from "next/font/local";
 import { COPY, SITE_URL } from "@/lib/config";
 import "./globals.css";
 
+// Only Molhim (everything above the fold) is preloaded. Plex covers Latin /
+// «» / punctuation fallbacks and Ruqaa a few handwritten touches: both load on
+// demand (display: swap), so ~350 KB stays off the critical path on phones.
 const plex = localFont({
   variable: "--font-plex",
   display: "swap",
+  preload: false,
   src: [
     { path: "../fonts/IBMPlexSansArabic-Regular.woff2", weight: "400", style: "normal" },
     { path: "../fonts/IBMPlexSansArabic-Medium.woff2", weight: "500", style: "normal" },
@@ -28,6 +32,7 @@ const molhim = localFont({
 const ruqaa = localFont({
   variable: "--font-ruqaa",
   display: "swap",
+  preload: false,
   src: [
     { path: "../fonts/ArefRuqaa-Regular.woff2", weight: "400", style: "normal" },
     { path: "../fonts/ArefRuqaa-Bold.woff2", weight: "700", style: "normal" },
@@ -42,10 +47,14 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title,
   description,
+  // The home page's canonical: tracking params (?fbclid, ?utm_…) and rejected
+  // ?q= values fold into "/". Letter and search pages set their own.
+  alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     locale: "ar_SA",
     siteName: COPY.brand,
+    url: "/",
     title,
     description,
     images: [{ url: "/api/og", width: 1200, height: 630 }],

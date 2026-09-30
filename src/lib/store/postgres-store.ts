@@ -3,7 +3,7 @@
 
 import postgres from "postgres";
 import { newId, variantFor } from "../ids";
-import { getDatabaseUrl, getReportHideThreshold } from "../server-config";
+import { getDatabaseUrl, getPgPoolMax, getReportHideThreshold, isServerless } from "../server-config";
 import { buildSearchText, tokenizeQuery } from "../text/normalize";
 import { normalizeContact } from "../validation";
 import type {
@@ -14,7 +14,6 @@ import type {
   MessageStatus,
   ModerationRecord,
   PublicMessage,
-  ReportReason,
   TeacherTitle,
 } from "../types";
 import { decodeCursor, encodeCursor } from "./cursor";
@@ -27,15 +26,21 @@ import {
   escapeLike,
   isValidVariant,
 } from "./shared";
-import type {
-  AdminListOptions,
-  AdminListResult,
-  AdminPatch,
-  AdminRecord,
-  ExportFilter,
-  MessageStore,
-  NewMessage,
-  RecentQuery,
+import {
+  DAY_MS,
+  REMOVAL_REQUESTS_PER_DEVICE_DAY,
+  REMOVAL_REQUESTS_PER_IP_DAY,
+  type AdminListOptions,
+  type AdminListResult,
+  type AdminPatch,
+  type AdminRecord,
+  type ExportFilter,
+  type MessageStore,
+  type NewMessage,
+  type RecentQuery,
+  type ReportInput,
+  type ReportOutcome,
+  type Voter,
 } from "./types";
 
 type Sql = postgres.Sql;
@@ -59,6 +64,8 @@ interface FullRow extends Row {
   removal_requested: boolean;
   review_reason: string | null;
   starred: boolean;
+  removal_kept: boolean;
+  flagged_at: Date | null;
   surprise_opt_in: boolean;
   contact: string | null;
   ip_hash: string | null;
@@ -77,11 +84,16 @@ function getClient(): Sql {
   if (!url) throw new Error("DATABASE_URL is not set");
   const cached = globalForPg.__letters_pg;
   if (cached && cached.url === url) return cached.sql;
+  const serverless = isServerless();
   const sql = postgres(url, {
-    max: 5,
-    idle_timeout: 20,
+    // Every serverless instance has its own pool: keep it tiny (PG_POOL_MAX,
+    // default 2) and drop idle sockets fast so suspended instances don't hold
+    // server slots. Point DATABASE_URL at the provider's pooled URL there.
+    max: getPgPoolMax(),
+    idle_timeout: serverless ? 5 : 20,
+    max_lifetime: serverless ? 5 * 60 : 30 * 60,
     connect_timeout: 10,
-    // Required for pgbouncer / Supabase transaction pooler.
+    // Required for pgbouncer / Supabase / Neon transaction poolers.
     prepare: false,
     onnotice: () => {},
   });
@@ -114,6 +126,8 @@ function toRecord(r: FullRow): AdminRecord {
     removalRequested: r.removal_requested === true,
     reviewReason: r.review_reason,
     starred: r.starred === true,
+    removalKept: r.removal_kept === true,
+    flaggedAt: r.flagged_at ? new Date(r.flagged_at).toISOString() : null,
     surpriseOptIn: r.surprise_opt_in === true,
     contact: r.contact,
     ipHash: r.ip_hash,
@@ -122,6 +136,10 @@ function toRecord(r: FullRow): AdminRecord {
     moderation: r.moderation ?? null,
   };
 }
+
+/** Advisory lock keys: the schema, and (namespace, hashtext(ip)) for removal requests. */
+const SCHEMA_LOCK = 7_231_005;
+const REMOVAL_LOCK_NS = 7_231_006;
 
 function isUniqueViolation(e: unknown): boolean {
   return !!e && typeof e === "object" && (e as { code?: unknown }).code === "23505";
@@ -148,15 +166,21 @@ export class PostgresStore implements MessageStore {
 
   private async applySchema(): Promise<void> {
     const sql = getClient();
-    // Already current? Skip the DDL (and its table locks) entirely.
-    const [cur] = await sql<{ v: string | null }[]>`
-      select obj_description(to_regclass('messages'), 'pg_class') as v`;
-    if (SCHEMA_VERSION && cur?.v === SCHEMA_VERSION) return;
+    const current = async (q: Sql | postgres.TransactionSql) => {
+      const [cur] = await q<{ v: string | null }[]>`
+        select obj_description(to_regclass('messages'), 'pg_class') as v`;
+      return !!SCHEMA_VERSION && cur?.v === SCHEMA_VERSION;
+    };
+    // Lock-free fast path: the marker is written last, in the same transaction
+    // as the DDL, so seeing it means everything before it is committed.
+    if (await current(sql)) return;
 
     try {
       await sql.begin(async (tx) => {
-        // Serialise concurrent cold starts (CREATE ... IF NOT EXISTS can race).
-        await tx`select pg_advisory_xact_lock(${7_231_005})`;
+        // Serialise cold starts, THEN decide: instances that queued on the lock
+        // find the marker already written and skip the DDL (and its table locks).
+        await tx`select pg_advisory_xact_lock(${SCHEMA_LOCK})`;
+        if (await current(tx)) return;
         for (const st of schemaStatements()) {
           if (!st.optional) {
             await tx.unsafe(st.sql);
@@ -285,15 +309,29 @@ export class PostgresStore implements MessageStore {
     return row?.n ?? 0;
   }
 
-  async toggleLike(id: string, voterHash: string, like: boolean): Promise<LikeResult | null> {
+  async toggleLike(id: string, like: boolean, who: Voter): Promise<LikeResult | null> {
     const sql = await this.db();
+    const { voterHash } = who;
+    // Cookie-less likes carry the IP hash: one counted per letter per IP per day.
+    const anonIp = like && who.newDevice ? who.ipHash : null;
     return sql.begin(async (tx) => {
-      const [m] = await tx<{ likes: number }[]>`
-        select likes from messages where id = ${id} and status = 'published'`;
+      const [m] = anonIp
+        ? await tx<{ likes: number }[]>`
+            select likes from messages where id = ${id} and status = 'published' for update`
+        : await tx<{ likes: number }[]>`
+            select likes from messages where id = ${id} and status = 'published'`;
       if (!m) return null;
       if (like) {
+        if (anonIp) {
+          const [seen] = await tx`
+            select 1 from message_likes
+            where message_id = ${id} and ip_hash = ${anonIp} and created_at > ${new Date(Date.now() - DAY_MS)}
+            limit 1`;
+          // Acknowledged, not counted (a real first-visit like on a shared IP loses nothing visible).
+          if (seen) return { likes: Number(m.likes), liked: true };
+        }
         const ins = await tx`
-          insert into message_likes (message_id, voter_hash) values (${id}, ${voterHash})
+          insert into message_likes (message_id, voter_hash, ip_hash) values (${id}, ${voterHash}, ${anonIp})
           on conflict do nothing
           returning 1`;
         if (ins.count === 0) return { likes: Number(m.likes), liked: true };
@@ -311,49 +349,71 @@ export class PostgresStore implements MessageStore {
     });
   }
 
-  async report(
-    id: string,
-    reporterHash: string,
-    reason: ReportReason,
-    note: string | null,
-  ): Promise<{ hidden: boolean } | null> {
+  async report(id: string, input: ReportInput): Promise<ReportOutcome | null> {
     const sql = await this.db();
+    const { voterHash: reporter, ipHash, reason, note } = input;
     const threshold = this.threshold;
     return sql.begin(async (tx) => {
-      const [m] = await tx<{ status: string }[]>`
-        select status from messages where id = ${id} for update`;
+      if (reason === "removal_request") {
+        // One requester's removal requests run one at a time, so the daily cap can't be raced.
+        await tx`select pg_advisory_xact_lock(${REMOVAL_LOCK_NS}::int, hashtext(${ipHash ?? reporter}))`;
+      }
+      const [m] = await tx<{ status: string; removal_kept: boolean }[]>`
+        select status, removal_kept from messages where id = ${id} for update`;
       if (!m) return null;
       const unchanged = { hidden: m.status !== "published" };
-      const [prev] = await tx<{ reason: string | null }[]>`
-        select reason from message_reports
-        where message_id = ${id} and reporter_hash = ${reporterHash}`;
+      // Earlier reports on this letter from this device OR this IP.
+      const seen = await tx<{ mine: boolean; reason: string | null }[]>`
+        select reporter_hash = ${reporter} as mine, reason from message_reports
+        where message_id = ${id} and (reporter_hash = ${reporter} or ip_hash = ${ipHash})`;
+      const prev = seen.find((r) => r.mine);
 
       if (reason === "removal_request") {
-        // Each reporter can escalate to a removal request once.
-        if (prev?.reason === "removal_request") return unchanged;
+        if (seen.some((r) => r.reason === "removal_request")) return unchanged;
+        const [c] = await tx<{ dev: number; ip: number }[]>`
+          select count(*) filter (where reporter_hash = ${reporter})::int as dev,
+                 count(*) filter (where ip_hash = ${ipHash})::int as ip
+          from message_reports
+          where reason = 'removal_request' and created_at >= ${new Date(Date.now() - DAY_MS)}
+            and (reporter_hash = ${reporter} or ip_hash = ${ipHash})`;
+        if ((c?.dev ?? 0) >= REMOVAL_REQUESTS_PER_DEVICE_DAY || (c?.ip ?? 0) >= REMOVAL_REQUESTS_PER_IP_DAY) {
+          return { ...unchanged, limited: true };
+        }
         if (prev) {
+          // Escalating an earlier report: it now counts towards today's cap.
           await tx`
-            update message_reports set reason = ${reason}, note = coalesce(${note}, note)
-            where message_id = ${id} and reporter_hash = ${reporterHash}`;
+            update message_reports
+            set reason = ${reason}, note = coalesce(${note}, note), ip_hash = coalesce(ip_hash, ${ipHash}),
+                created_at = ${new Date()}
+            where message_id = ${id} and reporter_hash = ${reporter}`;
         } else {
           await tx`
-            insert into message_reports (message_id, reporter_hash, reason, note)
-            values (${id}, ${reporterHash}, ${reason}, ${note})`;
+            insert into message_reports (message_id, reporter_hash, ip_hash, reason, note)
+            values (${id}, ${reporter}, ${ipHash}, ${reason}, ${note})`;
         }
-        const [u] = await tx<{ status: string }[]>`
-          update messages
-          set removal_requested = true,
-              status = case when status = 'hidden' then status else 'pending' end,
-              review_reason = case when status = 'hidden' then review_reason else 'removal_request' end
-          where id = ${id}
-          returning status`;
+        const [u] = m.removal_kept
+          ? // A moderator already kept it after a removal request: flag, don't hide.
+            await tx<{ status: string }[]>`
+              update messages
+              set flagged_at = ${new Date()},
+                  review_reason = case when status = 'published' then 'removal_request_again' else review_reason end
+              where id = ${id}
+              returning status`
+          : await tx<{ status: string }[]>`
+              update messages
+              set removal_requested = true,
+                  flagged_at = ${new Date()},
+                  status = case when status = 'hidden' then status else 'pending' end,
+                  review_reason = case when status = 'hidden' then review_reason else 'removal_request' end
+              where id = ${id}
+              returning status`;
         return { hidden: u.status !== "published" };
       }
 
-      if (prev) return unchanged;
+      if (seen.length > 0) return unchanged;
       await tx`
-        insert into message_reports (message_id, reporter_hash, reason, note)
-        values (${id}, ${reporterHash}, ${reason}, ${note})`;
+        insert into message_reports (message_id, reporter_hash, ip_hash, reason, note)
+        values (${id}, ${reporter}, ${ipHash}, ${reason}, ${note})`;
       // Back to review only when crossing the threshold, so a moderator re-publishing it sticks.
       const [u] = await tx<{ status: string }[]>`
         update messages
@@ -420,7 +480,9 @@ export class PostgresStore implements MessageStore {
         ? sql`order by created_at asc, id asc`
         : o.filter === "reported"
           ? sql`order by reports desc, created_at desc, id desc`
-          : sql`order by created_at desc, id desc`;
+          : o.filter === "removal"
+            ? sql`order by flagged_at desc nulls last, created_at desc, id desc`
+            : sql`order by created_at desc, id desc`;
 
     const [rows, [total], [c]] = await Promise.all([
       sql<FullRow[]>`
@@ -455,6 +517,10 @@ export class PostgresStore implements MessageStore {
       update messages
       set status = coalesce(${status}::text, status),
           starred = coalesce(${starred}::boolean, starred),
+          -- Kept = a moderator (still) has it published after a removal request.
+          removal_kept = case
+            when ${status}::text is null then removal_kept
+            else ${status}::text = 'published' and removal_requested end,
           review_reason = case when ${status}::text = 'published' then null else review_reason end
       where id = ${id}
       returning 1`;

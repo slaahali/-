@@ -8,12 +8,11 @@ import {
   deviceHash,
   hashIp,
   jsonNoStore,
-  logError,
   notFound,
   rateLimited,
   readDeviceId,
   readJsonBody,
-  serverError,
+  storeFailure,
 } from "@/lib/request";
 import { getStore } from "@/lib/store";
 
@@ -21,8 +20,9 @@ export const runtime = "nodejs";
 
 const LIKE_LIMIT = 60;
 const LIKE_WINDOW_MS = 60_000;
-// A client without the device cookie gets a fresh voter id on every call, so
-// cap how often one IP can like the same letter that way (CGNAT-friendly).
+// A client without the device cookie gets a fresh voter id on every call. The
+// store counts at most one such like per letter per IP per day (durably); this
+// in-memory cap only keeps a cookie-dropping script off the database.
 const NEW_DEVICE_LIKES_PER_LETTER = 10;
 const NEW_DEVICE_WINDOW_MS = 60 * 60_000;
 
@@ -35,7 +35,8 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/messages/[i
   const like = (body.value as { like?: unknown } | null)?.like;
   if (typeof like !== "boolean") return badRequest("like must be a boolean");
 
-  const ipKey = hashIp(req) ?? "unknown";
+  const ipHash = hashIp(req);
+  const ipKey = ipHash ?? "unknown";
   const limited = rateLimit(`like:${ipKey}`, LIKE_LIMIT, LIKE_WINDOW_MS);
   if (!limited.ok) return rateLimited(limited.retryAfter);
 
@@ -46,11 +47,14 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/messages/[i
   }
 
   try {
-    const result = await getStore().toggleLike(id, deviceHash(device), like);
+    const result = await getStore().toggleLike(id, like, {
+      voterHash: deviceHash(device),
+      ipHash,
+      newDevice: device.isNew,
+    });
     if (!result) return notFound();
     return attachDeviceCookie(jsonNoStore({ likes: result.likes, liked: result.liked }), device);
   } catch (e) {
-    logError("[api] like failed", e);
-    return serverError();
+    return storeFailure("[api] like failed", e);
   }
 }

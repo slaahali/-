@@ -32,19 +32,26 @@ import {
   isValidVariant,
   toPublic,
 } from "./shared";
-import type {
-  AdminListOptions,
-  AdminListResult,
-  AdminPatch,
-  AdminRecord,
-  ExportFilter,
-  MessageStore,
-  NewMessage,
-  RecentQuery,
+import {
+  DAY_MS,
+  REMOVAL_REQUESTS_PER_DEVICE_DAY,
+  REMOVAL_REQUESTS_PER_IP_DAY,
+  type AdminListOptions,
+  type AdminListResult,
+  type AdminPatch,
+  type AdminRecord,
+  type ExportFilter,
+  type MessageStore,
+  type NewMessage,
+  type RecentQuery,
+  type ReportInput,
+  type ReportOutcome,
+  type Voter,
 } from "./types";
 
 interface ReportEntry {
   by: string;
+  ip: string | null;
   reason: ReportReason;
   note: string | null;
   at: string;
@@ -56,6 +63,8 @@ interface FileData {
   messages: AdminRecord[];
   /** message id -> voter hashes */
   likes: Record<string, string[]>;
+  /** message id -> IP hash -> time of the last counted cookie-less like */
+  likeIps: Record<string, Record<string, string>>;
   /** message id -> one entry per reporter */
   reports: Record<string, ReportEntry[]>;
 }
@@ -72,7 +81,7 @@ const REASONS: readonly ReportReason[] = ["inappropriate", "removal_request", "o
 let warnedProduction = false;
 
 function emptyData(): FileData {
-  return { version: 2, messages: [], likes: {}, reports: {} };
+  return { version: 2, messages: [], likes: {}, likeIps: {}, reports: {} };
 }
 
 function isErrno(e: unknown, code: string): boolean {
@@ -118,6 +127,8 @@ export function migrateRow(raw: unknown): AdminRecord | null {
     removalRequested: bool(r.removalRequested),
     reviewReason: strOrNull(r.reviewReason),
     starred: bool(r.starred),
+    removalKept: bool(r.removalKept),
+    flaggedAt: typeof r.flaggedAt === "string" && Number.isFinite(Date.parse(r.flaggedAt)) ? r.flaggedAt : null,
     surpriseOptIn,
     contact: surpriseOptIn ? strOrNull(r.contact) : null,
     ipHash: strOrNull(r.ipHash),
@@ -143,10 +154,23 @@ function migrateReports(raw: unknown): Record<string, ReportEntry[]> {
       .filter((e) => typeof e.by === "string")
       .map((e) => ({
         by: e.by as string,
+        ip: strOrNull(e.ip),
         reason: REASONS.includes(e.reason as ReportReason) ? (e.reason as ReportReason) : "other",
         note: strOrNull(e.note),
         at: typeof e.at === "string" ? e.at : new Date(0).toISOString(),
       }));
+  }
+  return out;
+}
+
+function migrateLikeIps(raw: unknown): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [id, byIp] of Object.entries(raw as Record<string, unknown>)) {
+    if (!byIp || typeof byIp !== "object") continue;
+    out[id] = Object.fromEntries(
+      Object.entries(byIp as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
+    );
   }
   return out;
 }
@@ -239,6 +263,7 @@ export class FileStore implements MessageStore {
         version: 2,
         messages,
         likes: migrateLikes(parsed.likes),
+        likeIps: migrateLikeIps(parsed.likeIps),
         reports: migrateReports(parsed.reports),
       };
       dirty = parsed.version !== 2 || messages.length !== rows.length;
@@ -262,6 +287,8 @@ export class FileStore implements MessageStore {
         reports: 0,
         removalRequested: false,
         starred: false,
+        removalKept: false,
+        flaggedAt: null,
         ipHash: null,
         deviceHash: null,
         searchText: buildSearchText(d),
@@ -338,6 +365,8 @@ export class FileStore implements MessageStore {
         removalRequested: false,
         reviewReason: input.reviewReason,
         starred: false,
+        removalKept: false,
+        flaggedAt: null,
         surpriseOptIn: input.surpriseOptIn,
         contact: input.surpriseOptIn ? input.contact : null,
         ipHash: input.ipHash,
@@ -392,13 +421,23 @@ export class FileStore implements MessageStore {
     return data.messages.reduce((n, m) => (m.status === "published" ? n + 1 : n), 0);
   }
 
-  toggleLike(id: string, voterHash: string, like: boolean): Promise<LikeResult | null> {
+  toggleLike(id: string, like: boolean, who: Voter): Promise<LikeResult | null> {
     return this.mutate<LikeResult | null>((data) => {
       const m = this.findPublished(data, id);
       if (!m) return { result: null, changed: false };
+      const { voterHash } = who;
       const voters = data.likes[id] ?? [];
       const has = voters.includes(voterHash);
-      let changed = false;
+      const anonIp = like && who.newDevice ? who.ipHash : null;
+      if (anonIp && !has) {
+        const last = data.likeIps[id]?.[anonIp];
+        // One counted cookie-less like per letter per IP per day; later ones are acknowledged only.
+        if (last && Date.parse(last) > Date.now() - DAY_MS) {
+          return { result: { likes: m.likes, liked: true }, changed: false };
+        }
+        (data.likeIps[id] ??= {})[anonIp] = new Date().toISOString();
+      }
+      let changed = !!anonIp && !has;
       if (like && !has) {
         data.likes[id] = [...voters, voterHash];
         m.likes += 1;
@@ -412,27 +451,47 @@ export class FileStore implements MessageStore {
     });
   }
 
-  report(
-    id: string,
-    reporterHash: string,
-    reason: ReportReason,
-    note: string | null,
-  ): Promise<{ hidden: boolean } | null> {
-    return this.mutate<{ hidden: boolean } | null>((data) => {
+  report(id: string, input: ReportInput): Promise<ReportOutcome | null> {
+    return this.mutate<ReportOutcome | null>((data) => {
       const m = this.find(data, id);
       if (!m) return { result: null, changed: false };
+      const { voterHash: by, ipHash: ip, reason, note } = input;
       const entries = (data.reports[id] ??= []);
-      const prev = entries.find((r) => r.by === reporterHash);
+      // Earlier reports on this letter from this device OR this IP.
+      const seen = entries.filter((r) => r.by === by || (!!ip && r.ip === ip));
+      const prev = seen.find((r) => r.by === by);
+      const now = new Date().toISOString();
       const done = (changed: boolean) => ({ result: { hidden: m.status !== "published" }, changed });
 
       if (reason === "removal_request") {
-        // Each reporter can escalate to a removal request once.
-        if (prev?.reason === "removal_request") return done(false);
+        if (seen.some((r) => r.reason === "removal_request")) return done(false);
+        const since = new Date(Date.now() - DAY_MS).toISOString();
+        let dev = 0;
+        let fromIp = 0;
+        for (const list of Object.values(data.reports)) {
+          for (const r of list) {
+            if (r.reason !== "removal_request" || r.at < since) continue;
+            if (r.by === by) dev++;
+            if (ip && r.ip === ip) fromIp++;
+          }
+        }
+        if (dev >= REMOVAL_REQUESTS_PER_DEVICE_DAY || fromIp >= REMOVAL_REQUESTS_PER_IP_DAY) {
+          return { result: { hidden: m.status !== "published", limited: true }, changed: false };
+        }
         if (prev) {
+          // Escalating an earlier report: it now counts towards today's cap.
           prev.reason = reason;
           prev.note = note ?? prev.note;
+          prev.ip ??= ip;
+          prev.at = now;
         } else {
-          entries.push({ by: reporterHash, reason, note, at: new Date().toISOString() });
+          entries.push({ by, ip, reason, note, at: now });
+        }
+        m.flaggedAt = now;
+        if (m.removalKept) {
+          // A moderator already kept it after a removal request: flag, don't hide.
+          if (m.status === "published") m.reviewReason = "removal_request_again";
+          return done(true);
         }
         m.removalRequested = true;
         if (m.status !== "hidden") {
@@ -442,8 +501,8 @@ export class FileStore implements MessageStore {
         return done(true);
       }
 
-      if (prev) return done(false);
-      entries.push({ by: reporterHash, reason, note, at: new Date().toISOString() });
+      if (seen.length > 0) return done(false);
+      entries.push({ by, ip, reason, note, at: now });
       const before = m.reports;
       m.reports = before + 1;
       // Only when crossing the threshold, so a moderator re-publishing it sticks.
@@ -494,7 +553,9 @@ export class FileStore implements MessageStore {
         ? compareOld
         : o.filter === "reported"
           ? (a, b) => b.reports - a.reports || compareNew(a, b)
-          : compareNew,
+          : o.filter === "removal"
+            ? (a, b) => (b.flaggedAt ?? "").localeCompare(a.flaggedAt ?? "") || compareNew(a, b)
+            : compareNew,
     );
     const offset = clampOffset(o.offset);
     const limit = clampLimit(o.limit, MAX_ADMIN_PAGE_SIZE);
@@ -512,6 +573,8 @@ export class FileStore implements MessageStore {
       if (patch.status) {
         m.status = patch.status;
         if (patch.status === "published") m.reviewReason = null;
+        // Kept = a moderator (still) has it published after a removal request.
+        m.removalKept = patch.status === "published" && m.removalRequested;
       }
       if (typeof patch.starred === "boolean") m.starred = patch.starred;
       return { result: true, changed: true };
@@ -524,6 +587,7 @@ export class FileStore implements MessageStore {
       if (idx === -1) return { result: false, changed: false };
       data.messages.splice(idx, 1);
       delete data.likes[id];
+      delete data.likeIps[id];
       delete data.reports[id];
       return { result: true, changed: true };
     });

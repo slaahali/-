@@ -120,6 +120,36 @@ describe("moderateSubmission — word lists (MODERATION_AI=off)", () => {
     expect(v).toMatchObject({ ok: true, suspicious: false });
   });
 
+  it("rejects addressed contempt words, so no moderation mode can publish them", async () => {
+    for (const body of ["يا فاشل ما استفدنا منك شي طول السنة", "انت اغبى معلم شفته", "يا ظالم"]) {
+      const v = await moderateSubmission(input({ body }));
+      expect(v, body).toMatchObject({ ok: false, reason: "profanity", fields: ["body"] });
+    }
+  });
+
+  it("sends accusations against the teacher to review, in any field", async () => {
+    const body = await moderateSubmission(input({ body: "الاستاذ خالد مرتشي ويبيع الدرجات" }));
+    expect(body).toMatchObject({ ok: true, suspicious: true });
+    expect(body.suspicionReason).toContain("body");
+
+    const name = await moderateSubmission(input({ toName: "خالد مرتشي" }));
+    expect(name).toMatchObject({ ok: true, suspicious: true });
+    expect(name.suspicionReason).toContain("toName");
+  });
+
+  it("publishes real family names that look like insults", async () => {
+    const v = await moderateSubmission(
+      input({ toName: "إبراهيم السكران", fromName: "خالد الخضيري", body: "شكراً للأستاذ الخضيري على كل شي 💜" }),
+    );
+    expect(v).toMatchObject({ ok: true, suspicious: false });
+  });
+
+  it("sends a possible social handle to review", async () => {
+    const v = await moderateSubmission(input({ fromName: "سنابي nourah" }));
+    expect(v).toMatchObject({ ok: true, suspicious: true });
+    expect(v.suspicionReason).toContain("handle?");
+  });
+
   it("does not call the AI when it is off", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

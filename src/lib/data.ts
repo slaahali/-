@@ -1,12 +1,20 @@
-// Data access for Server Components (pages, metadata, OG images). Errors are
-// logged and swallowed so pages still render (with an empty wall) when the
-// database is unavailable. Only ever returns PublicMessage-shaped data.
+// Data access for Server Components (pages, metadata, OG images). Only ever
+// returns PublicMessage-shaped data. The hot reads are served from the store's
+// short per-instance cache (see store/read-cache.ts).
+//
+// Failures: the wall, scene and counter degrade to empty (the page still
+// renders); a single letter and the search summary THROW DataUnavailableError,
+// so a database blip becomes a 500 (retried by crawlers, never cached) instead
+// of a 404 or a wrong preview image cached by CDNs and social platforms.
 
 import { connection } from "next/server";
 import { isValidId } from "./ids";
 import { clampChars, logError } from "./request";
 import { getStore } from "./store";
+import { DataUnavailableError } from "./store/errors";
 import type { ListResult, PublicMessage } from "./types";
+
+export { DataUnavailableError } from "./store/errors";
 
 export const INITIAL_WALL_SIZE = 18;
 export const MAX_QUERY_CHARS = 60;
@@ -41,6 +49,7 @@ export async function getInitialWall(q?: string): Promise<ListResult> {
   }
 }
 
+/** null only when the letter doesn't exist / isn't published; throws DataUnavailableError when the store fails. */
 export async function getPublicMessage(id: string): Promise<PublicMessage | null> {
   await connection();
   if (!isValidId(id)) return null;
@@ -48,7 +57,7 @@ export async function getPublicMessage(id: string): Promise<PublicMessage | null
     return await getStore().get(id);
   } catch (e) {
     logError("[data] getPublicMessage failed", e);
-    return null;
+    throw new DataUnavailableError("getPublicMessage");
   }
 }
 
@@ -65,7 +74,8 @@ export async function getTotal(): Promise<number> {
 
 /**
  * For the search OG image / metadata: how many letters match `q`. An empty
- * query returns the total number of published letters.
+ * query returns the total number of published letters. Throws
+ * DataUnavailableError when the store fails (a "0 letters" image must not be cached).
  */
 export async function getSearchSummary(q: string | null | undefined): Promise<{ q: string; total: number }> {
   await connection();
@@ -78,6 +88,6 @@ export async function getSearchSummary(q: string | null | undefined): Promise<{ 
     return { q: query, total };
   } catch (e) {
     logError("[data] getSearchSummary failed", e);
-    return { q: query, total: 0 };
+    throw new DataUnavailableError("getSearchSummary");
   }
 }

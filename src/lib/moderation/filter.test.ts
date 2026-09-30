@@ -361,6 +361,237 @@ describe("checkText — soft signals", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Round-2 red-team findings. Per finding: what must be blocked, what must only
+// go to review (ok + soft), and what must stay clean (ok, no flag).
+// ---------------------------------------------------------------------------
+
+type Kind = "body" | "name" | "school";
+type Case = string | [string, Kind];
+const unpack = (c: Case): [string, Kind] => (typeof c === "string" ? [c, "body"] : c);
+const label = (c: Case) => (typeof c === "string" ? c : `${c[0]} (${c[1]})`);
+
+function expectBlocked(c: Case, reason: ModerationReason = "profanity") {
+  const [text, kind] = unpack(c);
+  const r = checkText(text, { kind });
+  expect(r.ok, label(c)).toBe(false);
+  expect(r.reason, label(c)).toBe(reason);
+}
+function expectReview(c: Case) {
+  const [text, kind] = unpack(c);
+  const r = checkText(text, { kind });
+  expect(r.ok, label(c)).toBe(true);
+  expect(r.soft.length, label(c)).toBeGreaterThan(0);
+}
+function expectClean(c: Case) {
+  const [text, kind] = unpack(c);
+  expect(checkText(text, { kind }), label(c)).toMatchObject({ ok: true, matches: [], soft: [] });
+}
+
+describe("findings — Gulf/Levantine/Egyptian sexual and profane spellings", () => {
+  it.each([
+    "ايرك بعيونك يا استاذ", "اير بهالمدرسة", "كص امك يا استاذ", "طيظك كبيرة يا استاذ", "شرموته",
+    "يا ابن الشرموته", "يا قحب٥", "يا قحبo", "يا ذبي", "انكحك يا استاذه", "ينكح الطالبات", "منيوق",
+    "يا ديوس", "يا عرصه", "يا مكوة",
+  ])("blocks: %s", (t) => expectBlocked(t));
+
+  it("keeps everyday words that share the stems", () => {
+    expectClean("سماعاتي اير بودز ضاعت وانت لقيتها 😂");
+    expectClean("كل ما شفت مكوة أتذكر يوم كويتي مريولي قبل الحفل 😂");
+  });
+
+  it("only flags «ايرك» (Eric) after a title or in a name field", () => {
+    expectReview("إلى مستر ايرك، شكراً على دروس الإنجليزي");
+    expectReview("مستر إيرك كان يعلمنا الإنجليزي بالأغاني");
+    expectReview(["ايرك", "name"]);
+  });
+});
+
+describe("findings — the name Fateh/Fatah is not the insult fat", () => {
+  it.each<Case>([
+    ["Fateh", "name"], ["Mr. Fateh", "name"], ["Fatah", "name"], "شكراً Mr. Fateh على كل حصة فيزياء",
+    "شكراً أستاذ Fateh، أنت قدوتي", "Thank you Mr. Fateh for every physics class",
+  ])("passes: %s", (c) => expectClean(c));
+
+  it.each<Case>(["you fat pig", "you are so fat", ["Ms. Kalba", "name"], "ya kalba"])("blocks: %s", (c) => expectBlocked(c));
+});
+
+describe("findings — defamation and accusations against a teacher", () => {
+  it.each<Case>([
+    "الاستاذ خالد مرتشي ويبيع الدرجات", "سرق فلوس الرحلة", "كان يسرق من ميزانية المدرسة",
+    "كان يضرب الطلاب بالعصا", "كان يعاكس البنات في الفصل", "كان يلمس الطالبات", "مسجون الحين بقضية اخلاقية",
+    "كان يغش في الاختبارات ويسرب الاسئلة", "الاستاذ فهد حشاش", "كانت تاخذ رشوة عشان الدرجات", "مزور شهادته",
+    "فصلوه بسبب فضيحة", "يتعاطى", "ابتزني", "هددني", "كان يرسل للطالبات رسايل خاصة بالليل",
+    ["خالد مرتشي", "name"],
+  ])("sends to review: %s", (c) => expectReview(c));
+
+  it.each<Case>([
+    "الاستاذ المرتشي", "يا حرامي", "انت مختلس", "كان يتحرش بالطالبات", "تحرش فيني", "استغلني جنسيا",
+    ["مرتشي", "name"],
+  ])("blocks explicit accusations: %s", (c) => expectBlocked(c));
+
+  it.each([
+    "كان يضرب لنا أمثلة من الحياة", "سرقت قلوبنا يا أستاذة 💜", "كنت تسرق من وقتك عشان تشرح لنا",
+    "علمتنا إن الرشوة حرام والغش حرام",
+  ])("keeps praise that shares the verbs: %s", (t) => expectClean(t));
+});
+
+describe("findings — addressed insults outside the list and more address forms", () => {
+  it.each([
+    "خسيس", "وضيع", "دشير", "نكره", "مطفوق", "عبيط", "اهطل", "طرطور", "عكروت", "حقود", "جبان", "سخيف",
+    "خايب", "بايخ", "شين", "طبل", "معقد",
+  ])("blocks «يا %s»", (w) => expectBlocked(`يا ${w} ما استفدنا منك شي`));
+
+  it.each<Case>([
+    "والله انك حمار يا استاذ", "إنك تيس ما تفهم", "انت بصراحة حمار", "انت اصلاً حمار", "كلكم حمير",
+    "شكلك قرد يا استاذ", "وجهك وجه حمار", ["الاستاذ هالحمار", "name"], "شكرا للأستاذ الحمار",
+    "شكرا للمعلم الكلب", "شكراً بالأستاذ الحمار", "inta kalb", "enta 7mar",
+  ])("blocks: %s", (c) => expectBlocked(c));
+
+  it("sends pointed or reported insults to review", () => {
+    expectReview("هالحمار ما يعرف يشرح");
+    expectReview("الكل كان يقول انك ظالم بس انا اعرف انك عادل");
+  });
+
+  it.each([
+    "والله انك كفو وما قصرت معنا", "عرفت انك تحب القهوة فجبت لك وحدة 😂", "شكلك كنت تعبان ذاك اليوم بس شرحت لنا",
+    "وجهك وجه خير علينا", "كلكم في القلب", "انت بصراحة أفضل معلم مر علي", "علمتنا الفرق بين المعرفة والنكرة",
+    "لما عرفنا انك مريض دعينا لك", "يا مس طول بالك علينا 😂", "انت كذا بين طلابك دايم", "enta 7abibi ya ustaz",
+  ])("passes: %s", (t) => expectClean(t));
+});
+
+describe("findings — self-deprecating stories are not insults", () => {
+  it.each([
+    "كنت طالب بليد وانت ما يأست مني أبداً…", "كنت ولد جاهل ما يعرف يقرأ وانت علمتني الحروف",
+    "كنت بنت بليدة في الإنجليزي والحين أدرّسه", "ما عمرك قلت لي انت غبي، دايم كنت تقول انت تقدر",
+    "كان أخوي مريض نفسي وانت وقفت معي", "كنت غبي وانت صبرت علي",
+  ])("at most flags: %s", (t) => expect(checkText(t).ok).toBe(true));
+
+  it.each([
+    "كان الكل يقول عني غبي وانت الوحيد اللي آمنت فيني", "يوم قلت للفصل: انتو مو أغبياء، انتو بس تعبانين",
+    "يا ولد انا كنت حمار بالرياضيات",
+  ])("passes: %s", (t) => expectClean(t));
+
+  it.each(["يا ولد الحمار", "انت غبي", "غبي انت", "ولد الحمار هذا"])("still blocks: %s", (t) => expectBlocked(t));
+});
+
+describe("findings — the family names الخضيري / السكران", () => {
+  it.each<Case>([
+    ["الأستاذ الخضيري", "name"], ["الأستاذ السكران", "name"], "الأستاذ السكران أعظم معلم لغة عربية مر علي",
+    ["خالد الخضيري", "name"], ["إبراهيم السكران", "name"], "شكراً للأستاذ الخضيري على كل شي",
+  ])("passes: %s", (c) => expectClean(c));
+
+  it.each<Case>(["يا خضيري", "انت سكران", ["خضيري", "name"]])("blocks the insult: %s", (c) => expectBlocked(c));
+});
+
+describe("findings — words split in three chunks, split addressed insults", () => {
+  it.each<Case>([
+    "يا شر مو طه", "يا شر🌹مو🌹طه", ["مدرسة الشر مو طه", "school"], ["مدرسة الشر مو طه", "name"],
+    "شرxموطه يا استاذه", "يا حما ر", "يا حم ار", "يا غب ي", "يا كل ب", "يا حيو ان", "f uc k you", ["fu ck", "name"],
+  ])("blocks: %s", (c) => expectBlocked(c));
+
+  it.each(["an al", "انت كل شي حلو في المدرسة", "يا كل الحب يا أستاذتي", "شفنا حما ر في المزرعة"])("passes: %s", (t) =>
+    expect(checkText(t).ok).toBe(true),
+  );
+});
+
+describe("findings — disguised phone numbers, handles and links", () => {
+  it.each<Case>([
+    "كلموني صفر خمسة خمسة واحد اثنين ثلاثة اربعة خمسة ستة سبعة", "خمسة خمسة ١٢٣٤٥٦٧", "رقمي 055🌸123🌸4567",
+    "رقمي 055،123،4567", "ايميلي noura.ksa22 جيميل", "لاتنسون تتابعون @ nourahh",
+  ])("blocks contact details: %s", (c) => expectBlocked(c, "contact_info"));
+
+  it.each(["t . me/nouraxx", "mysite . com", "example[.]com", "bit ly/abc12"])("blocks links: %s", (t) =>
+    expectBlocked(t, "link"),
+  );
+
+  it.each<Case>([
+    "سنابي nourah", "snap nourah", "انستا nouraksa", "تيك توك nourahh", "يوتيوب قناتي nourahh",
+    ["سنابي nourah", "name"], ["صفر خمسة خمسة واحد", "name"],
+  ])("sends possible handles / numbers to review: %s", (c) => expectReview(c));
+
+  it.each([
+    "أذكر جدول الضرب: ٧×٨=٥٦، ٩×٩=٨١، ٦×٧=٤٢", "كنا نعد معك واحد اثنين ثلاثة اربعة خمسة ونضحك 😂",
+    "تذكر سناب الفصل؟ كنا نصور كل شي 😂", "I saw your insta post about us", "we met @ school every morning",
+    "علمتني كيف أكتب ايميل رسمي بالإنجليزي",
+  ])("passes: %s", (t) => expectClean(t));
+});
+
+describe("findings — death wishes, curses and threats", () => {
+  it.each([
+    "عساك تنجلط يا استاذ", "الله يشلك", "الله يخسف فيك", "عسى الله ياخذ روحك", "ربي ياخذك ويريحنا منك",
+    "الله ياخدك يا استاذ", "انقبر يا استاذ", "عساك للنار", "بكسر راسك برا المدرسة", "بدهسك بالسيارة",
+  ])("blocks: %s", (t) => expectBlocked(t));
+
+  it.each(["الله يفضحك", "عساك تنشل", "ربي ينتقم منك", "بضربك بكرة"])("sends to review: %s", (t) => expectReview(t));
+
+  it.each([
+    "الله ياخذ بيدك ويوفقك", "عسى الله ياخذ بيدك دايم", "الله لا يكسر لك خاطر", "الله لا يضرك ولا يفجعنا فيك",
+    "عساك ما تمرض أبداً", "انشالله تكسر الدنيا في الماجستير 😂", "الله يشرح صدرك ويفتح عليك",
+  ])("keeps blessings: %s", (t) => expectClean(t));
+});
+
+describe("findings — addressed failure/contempt words are insults", () => {
+  it.each([
+    "يا فاشل ما استفدنا منك شي طول السنة", "يا ظالم ما عدلت بيننا", "يا مقرف", "انت اغبى معلم شفته", "يا بيسري",
+    "المعلم الظالم",
+  ])("blocks: %s", (t) => expectBlocked(t));
+
+  it("unaddressed they still only get a look", () => {
+    expectReview("كان ظالم معنا بالدرجات");
+    expectClean("ما كنت فاشل أبداً معك");
+  });
+});
+
+describe("findings — «بانيك» (panic) is slang, not «انيك»", () => {
+  it("passes", () => expectClean("جاني بانيك قبل الاختبار النهائي وانتي هديتيني بكلمة، الله يجزاك خير"));
+  it.each(["بانيكك", "بانيكها"])("still blocks %s", (t) => expectBlocked(t));
+});
+
+describe("review round 2 — contempt words after a title, opinions, number lists", () => {
+  it.each([
+    "يا أستاذ، أسوأ شي بالسنة إنها خلصت", "شكرا استاذي، اتعس يوم لما تقاعدت", "يا استاذ اغبى طالب عندك صار دكتور",
+    "شكرا يا أستاذ، نكره نودعك",
+  ])("a new clause after a title is only a look: %s", (t) => expectReview(t));
+
+  it.each(["الاستاذ الفاشل", "المعلم الظالم", "الاستاذ النكره", "انت نكره", "يا فاشل"])(
+    "the epithet or address still blocks: %s",
+    (t) => expectBlocked(t),
+  );
+
+  it.each(["اقول انك حمار", "اقول لك انت حمار", "اظن انك غبي", "اعتقد انك حقير", "اسمع انت حمار", "احس انك ظالم معي"])(
+    "an opinion said now is a direct insult: %s",
+    (t) => expectBlocked(t),
+  );
+
+  it("an opinion told in the past is a story", () => {
+    expectReview("كنت اظن انك ظالم بس طلعت احن معلم");
+    expectClean("كنا نقول انك قاسي بس طلعت ابونا");
+  });
+
+  it.each(["درجاتي 100, 100, 100, 99", "صفوف 1,2,3,4,5,6,7,8,9,10", "من 1/9/2023 – 30/6/2024 كنت في فصلك"])(
+    "number lists and date ranges are not phones: %s",
+    (t) => expectClean(t),
+  );
+
+  it.each(["رقمي 055،123،4567", "00966،55،1234567", "0020،100،123،4567"])("list-shaped phones still block: %s", (t) =>
+    expectBlocked(t, "contact_info"),
+  );
+
+  it.each(["عساك تقبرني يا استاذ", "الواير انقطع", "واير الشاحن خربان"])("passes: %s", (t) => expectClean(t));
+});
+
+describe("checkText — speed", () => {
+  it("checks a 600-character letter in well under 5 ms", () => {
+    const letter = CLEAN_BODIES[CLEAN_BODIES.length - 1].padEnd(600, " شكراً يا أستاذ");
+    for (let i = 0; i < 20; i++) checkText(letter);
+    const runs = 100;
+    const t0 = performance.now();
+    for (let i = 0; i < runs; i++) checkText(letter);
+    expect((performance.now() - t0) / runs).toBeLessThan(5);
+  });
+});
+
 describe("checkText — details", () => {
   it("never treats years or short numbers as phone numbers", () => {
     for (const t of ["من 2010 - 2014 - 2018 كنت معك", "تخرجت ١٤٤٠ - ١٤٤٤", "الصف 3/2", "درجة 99.5 من 100"]) {

@@ -80,7 +80,10 @@ export function AdminItem({
   const long = m.body.length > 240 || m.body.split("\n").length > 5;
   const [expanded, setExpanded] = useState(() => expandsByDefault(filter));
   const reason = humanReviewReason(m.reviewReason);
-  const showReason = reason && !(m.removalRequested && m.reviewReason === "removal_request");
+  // Kept after a removal request, then asked again: still public, needs another look.
+  const flaggedAgain = m.status === "published" && m.reviewReason === "removal_request_again";
+  const showReason =
+    reason && !flaggedAgain && !(m.removalRequested && m.reviewReason === "removal_request");
   const mod = moderationSummary(m.moderation);
   const queue = filter === "pending";
   const absolute = formatAbsolute(m.createdAt);
@@ -114,7 +117,13 @@ export function AdminItem({
         إخفاء
       </button>
     ) : null;
-  actions.push(...(hideFirst ? [hide, publish] : [publish, hide]));
+  // Re-publishing clears the flag (the server keeps the letter as it is).
+  const keep = flaggedAgain ? (
+    <button key="keep" type="button" disabled={busy} className={BTN.quiet} onClick={() => onStatus(m, "published")}>
+      إبقاء منشورة
+    </button>
+  ) : null;
+  actions.push(...(hideFirst ? [hide, publish ?? keep] : [publish ?? keep, hide]));
   if (m.status !== "pending") {
     actions.push(
       <button key="pending" type="button" disabled={busy} className={BTN.quiet} onClick={() => onStatus(m, "pending")}>
@@ -225,8 +234,13 @@ export function AdminItem({
               {COPY.memoryTag}
             </Badge>
           ) : null}
-          {m.removalRequested ? (
+          {flaggedAgain ? (
+            <Badge className="border-danger bg-danger text-white">طلب حذف جديد — ما زالت منشورة</Badge>
+          ) : m.removalRequested ? (
             <Badge className="border-danger bg-danger text-white">طلب حذف من الشخص المذكور</Badge>
+          ) : null}
+          {m.removalKept && !flaggedAgain ? (
+            <Badge className="border-line-strong bg-cream-2 text-ink-soft">أُبقيت بعد مراجعة طلب الحذف</Badge>
           ) : null}
           {m.reports > 0 ? (
             <Badge className="border-danger/30 bg-danger/10 text-danger">

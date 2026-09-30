@@ -104,12 +104,16 @@ export function membershipDelta(
   return (after && matchesFilter(filter, after) ? 1 : 0) - (before && matchesFilter(filter, before) ? 1 : 0);
 }
 
-/** Local mirror of the server's update (publishing also clears the review reason). */
+/**
+ * Local mirror of the server's update: publishing clears the review reason and,
+ * after a removal request, marks the letter as kept.
+ */
 export function applyPatch(m: AdminMessage, patch: AdminPatch): AdminMessage {
   return {
     ...m,
     ...(patch.status !== undefined ? { status: patch.status } : null),
     ...(patch.status === "published" ? { reviewReason: null } : null),
+    ...(patch.status !== undefined ? { removalKept: patch.status === "published" && m.removalRequested } : null),
     ...(patch.starred !== undefined ? { starred: patch.starred } : null),
   };
 }
@@ -242,6 +246,7 @@ export function humanReviewReason(reason: string | null): string | null {
   if (!r) return null;
   if (r === "review_all") return "وضع مراجعة كل الرسائل";
   if (r === "removal_request") return "طلب حذف من الشخص المذكور";
+  if (r === "removal_request_again") return "طلب حذف جديد بعد ما أبقيتوها منشورة";
   if (/^report/.test(r)) return "وصلت حد البلاغات";
   const suspicious = /^suspicious\s*:?\s*([\s\S]*)$/.exec(r);
   if (suspicious) return suspicious[1] ? `اشتباه من الفلتر: ${reasonLabel(suspicious[1])}` : "اشتباه من الفلتر";

@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { COPY } from "@/lib/config";
 import type { AdminFilter } from "@/lib/types";
 import type { AdminMessage } from "./admin-api";
 import { ADMIN_FILTERS } from "./admin-model";
@@ -86,8 +87,23 @@ describe("AdminItem", () => {
     expect(published).not.toContain("aria-keyshortcuts");
   });
 
+  it("flags a kept letter that got a new removal request, with a way to keep it", () => {
+    const html = render("removal", {
+      status: "published",
+      removalRequested: true,
+      removalKept: true,
+      reviewReason: "removal_request_again",
+    });
+    expect(html).toContain("طلب حذف جديد");
+    expect(html).toContain("إبقاء منشورة");
+    expect(html).not.toContain("اعتماد ونشر");
+    const kept = render("removal", { status: "published", removalRequested: true, removalKept: true, reviewReason: null });
+    expect(kept).toContain("أُبقيت بعد مراجعة طلب الحذف");
+    expect(kept).not.toContain("إبقاء منشورة");
+  });
+
   it("marks in-memory letters", () => {
-    expect(render("all", { inMemory: true })).toContain("في ذكرى 🕊️");
+    expect(render("all", { inMemory: true })).toContain(COPY.memoryTag);
     expect(render("all", { inMemory: true })).toContain("إلى روح");
   });
 });

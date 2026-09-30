@@ -5,10 +5,9 @@ import {
   badRequest,
   bodyError,
   jsonNoStore,
-  logError,
   notFound,
   readJsonBody,
-  serverError,
+  storeFailure,
 } from "@/lib/request";
 import { getStore } from "@/lib/store";
 import type { AdminPatch } from "@/lib/store/types";
@@ -48,8 +47,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/admin/mess
     const ok = await getStore().adminUpdate(id, patch);
     return ok ? jsonNoStore({ ok: true }) : notFound();
   } catch (e) {
-    logError("[api] admin update failed", e);
-    return serverError();
+    return storeFailure("[api] admin update failed", e);
   }
 }
 
@@ -63,7 +61,6 @@ export async function DELETE(req: NextRequest, ctx: RouteContext<"/api/admin/mes
     const ok = await getStore().adminDelete(id);
     return ok ? jsonNoStore({ ok: true }) : notFound();
   } catch (e) {
-    logError("[api] admin delete failed", e);
-    return serverError();
+    return storeFailure("[api] admin delete failed", e);
   }
 }

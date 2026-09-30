@@ -44,7 +44,9 @@ export function AdminTabs({
   }
 
   return (
-    <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] sm:-mx-6 sm:px-6 [&::-webkit-scrollbar]:hidden">
+    // `relative`: the badges' visually-hidden spans are absolutely positioned; without a
+    // positioned ancestor they escape the scroller and widen the whole page on phones.
+    <div className="relative -mx-4 overflow-x-auto px-4 [scrollbar-width:none] sm:-mx-6 sm:px-6 [&::-webkit-scrollbar]:hidden">
       <div role="tablist" aria-label="تصنيفات الرسائل" className="flex w-max gap-1.5 py-1">
         {ADMIN_TABS.map((t, i) => {
           const selected = t.filter === value;

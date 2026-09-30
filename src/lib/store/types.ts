@@ -131,8 +131,9 @@ export interface MessageStore {
   /** pending: oldest first (a queue) · reported: most reports first · removal: latest request first · others: newest first. */
   adminList(o: AdminListOptions): Promise<AdminListResult>;
   /**
-   * Publishing clears reviewReason (removalRequested is kept for the audit trail)
-   * and, after a removal request, sets removalKept. false when missing.
+   * Publishing clears reviewReason (removalRequested is kept for the audit trail);
+   * removalKept follows whether a moderator has it published after a removal
+   * request (so an undo to pending/hidden clears it). false when missing.
    */
   adminUpdate(id: string, patch: AdminPatch): Promise<boolean>;
   adminDelete(id: string): Promise<boolean>;

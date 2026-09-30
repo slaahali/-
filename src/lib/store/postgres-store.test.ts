@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PublicMessage } from "../types";
 import { PostgresStore } from "./postgres-store";
 import { SCHEMA_VERSION } from "./schema";
-import type { NewMessage } from "./types";
+import type { NewMessage, ReportInput, Voter } from "./types";
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -29,6 +29,20 @@ function input(over: Partial<NewMessage> = {}): NewMessage {
     ...over,
   };
 }
+
+const voter = (voterHash: string, ipHash: string | null = "ip-1", newDevice = false): Voter => ({
+  voterHash,
+  ipHash,
+  newDevice,
+});
+
+const rep = (
+  voterHash: string,
+  reason: ReportInput["reason"],
+  note: string | null = null,
+  ipHash: string | null = null,
+  newDevice = false,
+): ReportInput => ({ voterHash, ipHash, newDevice, reason, note });
 
 // The schema the first version of the app created.
 const LEGACY_SCHEMA = `
@@ -95,6 +109,38 @@ describe.skipIf(!url)("PostgresStore (TEST_DATABASE_URL)", () => {
     await admin`delete from messages where id = 'legacy0001'`;
   });
 
+  it("re-checks the version under the advisory lock: concurrent cold starts apply the DDL once", async () => {
+    await admin`comment on table messages is 'teachers-day-letters schema v0'`;
+    const g = globalThis as { __letters_pg?: { sql: postgres.Sql } };
+    const client = g.__letters_pg!.sql;
+    const begin = client.begin.bind(client);
+    let ddl = 0;
+    // Count the schema statements every instance runs (they share the pooled client).
+    const spy = vi.spyOn(client, "begin").mockImplementation(((fn: (tx: postgres.TransactionSql) => unknown) =>
+      begin(async (tx) => {
+        const unsafe = tx.unsafe.bind(tx);
+        tx.unsafe = ((q: string, ...rest: unknown[]) => {
+          ddl++;
+          return (unsafe as (...a: unknown[]) => unknown)(q, ...rest);
+        }) as typeof tx.unsafe;
+        return fn(tx);
+      })) as unknown as typeof client.begin);
+    try {
+      await Promise.all(Array.from({ length: 4 }, () => new PostgresStore().ensureSchema()));
+    } finally {
+      spy.mockRestore();
+    }
+    const required = (await import("./schema")).schemaStatements().filter((st) => !st.optional).length;
+    expect(ddl).toBe(required);
+    const [v] = await admin`select obj_description('messages'::regclass, 'pg_class') as v`;
+    expect(v.v).toBe(SCHEMA_VERSION);
+    // The status check is only replaced when it differs.
+    const [c] = await admin`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid = 'messages'::regclass and conname = 'messages_status_check'`;
+    expect(c.def).toContain("pending");
+  });
+
   it("creates published / pending letters; public reads only see published", async () => {
     const pub = await store.create(input({ surpriseOptIn: true, contact: "+966500000009", inMemory: true }));
     const pend = await store.create(input({ toName: "خالد", status: "pending", reviewReason: "review_all" }));
@@ -122,7 +168,7 @@ describe.skipIf(!url)("PostgresStore (TEST_DATABASE_URL)", () => {
       made.push(await store.create(input({ toName: `نورة ${i}`, school: i % 2 ? "مدرسة 100%_ok" : "Kingdom Schools" })));
     }
     for (const [i, m] of made.entries()) {
-      for (let v = 0; v < i % 4; v++) await store.toggleLike(m.id, `voter-${v}`, true);
+      for (let v = 0; v < i % 4; v++) await store.toggleLike(m.id, true, voter(`voter-${v}`));
     }
     const q = async (text: string) => (await store.list({ q: text, sort: "new", limit: 20 })).total;
     expect(await q("نوره")).toBe(7);
@@ -151,32 +197,75 @@ describe.skipIf(!url)("PostgresStore (TEST_DATABASE_URL)", () => {
 
   it("likes are idempotent per voter", async () => {
     const m = await store.create(input());
-    expect(await store.toggleLike(m.id, "v1", true)).toEqual({ likes: 1, liked: true });
-    expect(await store.toggleLike(m.id, "v1", true)).toEqual({ likes: 1, liked: true });
-    await Promise.all(Array.from({ length: 10 }, (_, i) => store.toggleLike(m.id, `c${i}`, true)));
+    expect(await store.toggleLike(m.id, true, voter("v1"))).toEqual({ likes: 1, liked: true });
+    expect(await store.toggleLike(m.id, true, voter("v1"))).toEqual({ likes: 1, liked: true });
+    await Promise.all(Array.from({ length: 10 }, (_, i) => store.toggleLike(m.id, true, voter(`c${i}`))));
     expect((await store.get(m.id))?.likes).toBe(11);
-    expect(await store.toggleLike(m.id, "v1", false)).toEqual({ likes: 10, liked: false });
-    expect(await store.toggleLike("missing000", "v1", true)).toBeNull();
+    expect(await store.toggleLike(m.id, false, voter("v1"))).toEqual({ likes: 10, liked: false });
+    expect(await store.toggleLike("missing000", true, voter("v1"))).toBeNull();
+  });
+
+  it("counts one cookie-less like per letter per IP per day, even when raced", async () => {
+    const m = await store.create(input());
+    await Promise.all(Array.from({ length: 8 }, (_, i) => store.toggleLike(m.id, true, voter(`anon-${i}`, "ip-x", true))));
+    expect((await store.get(m.id))?.likes).toBe(1);
+    expect(await store.toggleLike(m.id, true, voter("anon-y", "ip-y", true))).toEqual({ likes: 2, liked: true });
+    expect(await store.toggleLike(m.id, true, voter("cookie", "ip-x"))).toEqual({ likes: 3, liked: true });
+    await admin`update message_likes set created_at = now() - interval '25 hours' where message_id = ${m.id} and ip_hash = 'ip-x'`;
+    expect(await store.toggleLike(m.id, true, voter("anon-z", "ip-x", true))).toEqual({ likes: 4, liked: true });
   });
 
   it("reports: threshold, re-publish sticks, removal requests", async () => {
     const m = await store.create(input());
-    expect(await store.report(m.id, "r1", "inappropriate", null)).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r1", "other", null)).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r2", "other", "note")).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r3", "inappropriate", null)).toEqual({ hidden: true });
+    expect(await store.report(m.id, rep("r1", "inappropriate", null, "ip-1"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r1", "other", null, "ip-1"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r2", "other", "note", "ip-2"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r3", "inappropriate", null, "ip-3"))).toEqual({ hidden: true });
     let [row] = (await store.adminList({ filter: "all", q: m.id, limit: 1, offset: 0 })).items;
     expect(row).toMatchObject({ status: "pending", reports: 3, reviewReason: "reports" });
 
     await store.adminUpdate(m.id, { status: "published" });
-    expect(await store.report(m.id, "r4", "inappropriate", null)).toEqual({ hidden: false });
-    expect(await store.report(m.id, "r1", "removal_request", "أنا")).toEqual({ hidden: true });
+    expect(await store.report(m.id, rep("r4", "inappropriate", null, "ip-4"))).toEqual({ hidden: false });
+    expect(await store.report(m.id, rep("r1", "removal_request", "أنا", "ip-1"))).toEqual({ hidden: true });
     [row] = (await store.adminList({ filter: "removal", limit: 5, offset: 0 })).items;
     expect(row).toMatchObject({ id: m.id, status: "pending", removalRequested: true, reviewReason: "removal_request", reports: 4 });
-    expect(await store.report(m.id, "r1", "removal_request", null)).toEqual({ hidden: true });
-    const [rep] = await admin`select reason, note from message_reports where message_id = ${m.id} and reporter_hash = 'r1'`;
-    expect(rep).toEqual({ reason: "removal_request", note: "أنا" });
-    expect(await store.report("missing000", "r1", "other", null)).toBeNull();
+    expect(row.flaggedAt).toBeTruthy();
+    expect(await store.report(m.id, rep("r1", "removal_request", null, "ip-1"))).toEqual({ hidden: true });
+    const [r] = await admin`select reason, note, ip_hash from message_reports where message_id = ${m.id} and reporter_hash = 'r1'`;
+    expect(r).toEqual({ reason: "removal_request", note: "أنا", ip_hash: "ip-1" });
+    expect(await store.report("missing000", rep("r1", "other"))).toBeNull();
+  });
+
+  it("a reporter is a device OR an IP: cookie-less repeats never reach the threshold", async () => {
+    const m = await store.create(input());
+    await Promise.all(Array.from({ length: 6 }, (_, i) => store.report(m.id, rep(`fresh-${i}`, "inappropriate", null, "ip-bad", true))));
+    await store.report(m.id, rep("dev-2", "other", null, "ip-bad"));
+    const [row] = (await store.adminList({ filter: "all", q: m.id, limit: 1, offset: 0 })).items;
+    expect(row).toMatchObject({ status: "published", reports: 1 });
+  });
+
+  it("kept letters are only flagged by later removal requests; daily caps per device / IP", async () => {
+    const m = await store.create(input());
+    await store.report(m.id, rep("k1", "removal_request", null, "ip-k1"));
+    await store.adminUpdate(m.id, { status: "published" });
+    let [row] = (await store.adminList({ filter: "all", q: m.id, limit: 1, offset: 0 })).items;
+    expect(row).toMatchObject({ status: "published", removalKept: true, reviewReason: null });
+    expect(await store.report(m.id, rep("k2", "removal_request", null, "ip-k2"))).toEqual({ hidden: false });
+    [row] = (await store.adminList({ filter: "removal", limit: 1, offset: 0 })).items;
+    expect(row).toMatchObject({ id: m.id, status: "published", reviewReason: "removal_request_again" });
+    expect(await store.get(m.id)).not.toBeNull();
+
+    const ids = await Promise.all(Array.from({ length: 7 }, () => store.create(input()).then((x) => x.id)));
+    // Raced from one IP with a new device each time: exactly 5 get through.
+    const results = await Promise.all(ids.map((id, i) => store.report(id, rep(`anon-${i}`, "removal_request", null, "ip-cap", true))));
+    expect(results.filter((x) => x?.limited)).toHaveLength(2);
+    expect(results.filter((x) => x?.hidden && !x.limited)).toHaveLength(5);
+    // Per device: 3 a day, whatever the IP.
+    const more = await Promise.all(Array.from({ length: 4 }, () => store.create(input()).then((x) => x.id)));
+    for (const [i, id] of more.entries()) {
+      const out = await store.report(id, rep("dev-cap", "removal_request", null, `ip-d${i}`));
+      expect(out?.limited ?? false).toBe(i >= 3);
+    }
   });
 
   it("admin: counts, queue order, filters, contact search, export, delete; rate-limit counts", async () => {

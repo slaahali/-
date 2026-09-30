@@ -12,7 +12,10 @@ import {
 import { normalizeCounts } from "./admin-model";
 
 /** What the admin endpoints return per letter (the server strips ipHash; we drop it too). */
-export type AdminMessage = Omit<MessageRecord, "ipHash" | "searchText">;
+export type AdminMessage = Omit<MessageRecord, "ipHash" | "searchText"> & {
+  /** A moderator re-published it after a removal request; later ones only flag it. */
+  removalKept?: boolean;
+};
 
 export interface AdminListParams {
   filter: AdminFilter;
@@ -234,6 +237,7 @@ export function normalizeItem(raw: unknown): AdminMessage | null {
     status: STATUSES.includes(r.status as MessageStatus) ? (r.status as MessageStatus) : "pending",
     reports: num(r.reports),
     removalRequested: r.removalRequested === true,
+    removalKept: r.removalKept === true,
     reviewReason: strOrNull(r.reviewReason),
     starred: r.starred === true,
     surpriseOptIn: r.surpriseOptIn === true,
