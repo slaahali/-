@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useLetters } from "@/components/LettersProvider";
+import { useLetters, useOpenLetter } from "@/components/LettersProvider";
 import { COPY } from "@/lib/config";
 import { formatCount, toSceneLetter } from "@/lib/format";
 import { track } from "@/lib/track";
@@ -28,7 +28,8 @@ const TITLE_START = TITLE_WORDS.join(" ");
 const fade = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
 export function Hero({ letters }: { letters: PublicMessage[] }) {
-  const { total, openLetter, hiddenIds, openMessage, remember } = useLetters();
+  const { total, openLetter, hiddenIds, remember } = useLetters();
+  const { openMessage } = useOpenLetter();
   const [immersiveOpen, setImmersiveOpen] = useState(false);
   const [immersiveMounted, setImmersiveMounted] = useState(false);
   const exploreRef = useRef<HTMLButtonElement>(null);
@@ -69,6 +70,12 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
           ].join(", "),
         }}
       />
+      {/* Phones: the plum glow fades out before the section edge, so no lavender
+          strip shows under the header when a link lands on #write. */}
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 -z-10 h-28 bg-linear-to-b from-canvas/0 to-canvas sm:hidden"
+      />
 
       <div className="absolute inset-0">
         <LettersScene
@@ -80,8 +87,8 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
       </div>
 
       {/* Foreground: the wrapper ignores the pointer so floating letters stay hoverable. */}
-      <div className="pointer-events-none relative z-10 flex flex-1 flex-col items-center justify-center px-4 pt-20 pb-12 text-center sm:pt-28 sm:pb-20">
-        <div className="relative isolate flex w-full max-w-[21.5rem] flex-col items-center sm:max-w-3xl">
+      <div className="pointer-events-none relative z-10 flex flex-1 flex-col items-center justify-center px-4 pt-[4.5rem] pb-12 text-center sm:pt-28 sm:pb-20">
+        <div className="relative isolate flex w-full max-w-[26rem] flex-col items-center sm:max-w-3xl">
           <div
             aria-hidden
             className="absolute -inset-x-10 -inset-y-12 -z-10 sm:-inset-x-24 sm:-inset-y-14"
@@ -102,7 +109,7 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
 
           <h1
             id="hero-title"
-            className="mt-3 animate-fade-up text-[length:clamp(3.3rem,2.1rem+4.6vw,6rem)] leading-[1.12] font-bold text-plum sm:mt-4"
+            className="mt-3 animate-fade-up text-[2.875rem] leading-[1.12] font-bold text-plum min-[400px]:text-[3.1rem] sm:mt-4 sm:text-[length:clamp(3.3rem,2.1rem+4.6vw,6rem)]"
             style={fade(90)}
           >
             <span className="block sm:inline">{TITLE_START}</span>{" "}
@@ -126,14 +133,14 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
           </h1>
 
           <p
-            className="mt-6 max-w-[34rem] animate-fade-up text-[1.05rem] leading-8 text-pretty text-ink-soft sm:text-lg sm:leading-9"
+            className="mt-4 max-w-[34rem] animate-fade-up text-body leading-7 text-pretty text-ink-soft sm:mt-6 sm:text-lg sm:leading-9"
             style={fade(180)}
           >
             {first} <span className="sm:block">{second}</span>
           </p>
 
           <div
-            className="pointer-events-auto mt-8 grid w-full animate-fade-up gap-3 sm:flex sm:w-auto sm:justify-center"
+            className="pointer-events-auto mt-7 grid w-full animate-fade-up gap-3 sm:mt-8 sm:flex sm:w-auto sm:justify-center"
             style={fade(270)}
           >
             <a href="#write" className="btn btn-primary text-[1.05rem] sm:min-w-[11rem]">
@@ -182,7 +189,7 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
 /** The live count, written like a note in the margin, with a link down to the search. */
 function CounterNote({ total, style }: { total: number; style: CSSProperties }) {
   return (
-    <div className="mt-7 flex animate-fade-up items-start gap-2 text-start" style={style}>
+    <div className="mt-5 flex animate-fade-up items-start gap-2 text-start sm:mt-7" style={style}>
       <svg
         aria-hidden
         viewBox="0 0 48 40"

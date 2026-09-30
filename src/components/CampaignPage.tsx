@@ -5,6 +5,7 @@ import { LettersProvider } from "@/components/LettersProvider";
 import { Hero } from "@/components/hero/Hero";
 import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
+import { preloadLetterArt } from "@/components/letter/letter-art";
 import { LetterModal } from "@/components/letter/LetterModal";
 import { SoundToggle } from "@/components/ui/SoundToggle";
 import { WallSection } from "@/components/wall/WallSection";
@@ -58,15 +59,22 @@ export function CampaignPage({
   }, [initialQuery]);
 
   // Decode the sound clips on the first interaction, so the first letter
-  // opens with its sound instead of a fetch.
+  // opens with its sound instead of a fetch. The seals and stamps load then
+  // too, or once the page is idle, so the first letter's seal is there to crack.
   useEffect(() => {
     const events = ["pointerdown", "keydown"] as const;
     const warm = () => {
       for (const e of events) window.removeEventListener(e, warm, true);
       preloadSounds();
+      preloadLetterArt();
     };
     for (const e of events) window.addEventListener(e, warm, { capture: true, passive: true });
+    const idle = window.setTimeout(() => {
+      if ("requestIdleCallback" in window) window.requestIdleCallback(preloadLetterArt, { timeout: 2000 });
+      else preloadLetterArt();
+    }, 2500);
     return () => {
+      window.clearTimeout(idle);
       for (const e of events) window.removeEventListener(e, warm, true);
     };
   }, []);
@@ -86,7 +94,8 @@ export function CampaignPage({
         <WallSection initial={initial} initialQuery={initialQuery} />
       </main>
       <Footer />
-      <SoundToggle className="fixed end-4 bottom-[max(1rem,calc(env(safe-area-inset-bottom)+0.5rem))] z-30 bg-white/90 shadow-soft backdrop-blur-sm sm:end-6 sm:bottom-6" />
+      {/* From md up (phones have it in the header, where it covers no buttons). */}
+      <SoundToggle className="fixed end-4 bottom-[max(1rem,calc(env(safe-area-inset-bottom)+0.5rem))] z-30 hidden bg-white/90 shadow-soft backdrop-blur-sm sm:end-6 sm:bottom-6 md:inline-grid" />
       <LetterModal />
     </LettersProvider>
   );

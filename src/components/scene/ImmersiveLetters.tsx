@@ -576,13 +576,13 @@ function TunnelOverlay({
           </p>
         </div>
         <div className="flex items-center gap-2 justify-self-end">
-          <SoundToggle className="size-10 bg-white/80 backdrop-blur-sm sm:size-11" />
+          <SoundToggle className="size-11 bg-white/80 backdrop-blur-sm" />
           <button
             type="button"
             onClick={onClose}
             aria-label="إغلاق"
             title="إغلاق (Esc)"
-            className="icon-btn size-10 bg-white/80 backdrop-blur-sm sm:size-11"
+            className="icon-btn size-11 bg-white/80 backdrop-blur-sm"
           >
             <svg aria-hidden viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
               <path d="M6 6l12 12M18 6L6 18" />

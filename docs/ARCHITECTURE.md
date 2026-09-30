@@ -37,6 +37,11 @@ Same mechanics, but **light, warm and practical**, in The Chefz identity:
 - Brand colours: plum `#691d4e` (primary text/structure), orange `#eb652c`
   (CTAs/accents), magenta-plum `#a73784`, gold `#f7a64f`, cream `#f8f3ec`.
   Tokens live in `src/app/globals.css` (`@theme`). Use them; don't invent colours.
+- Phone type scale (`@theme` `--text-*`, used as `text-caption` … `text-h2`):
+  caption 13 · small 14 · ui 15 · body 16 · lead 17 · letter 18 · title 22 · h3 28 ·
+  h2 32 (px). Phone sizes go in base classes, wider screens keep theirs behind
+  `sm:`; nothing visible under 13px. In-page links use one offset: `html`
+  `scroll-padding-top` (header + 16px), no per-section `scroll-mt` on phones.
 - Fonts (self-hosted): **IBM Plex Sans Arabic** for UI (`font-sans`), **Aref Ruqaa**
   for anything "handwritten" — letter bodies in the letter view, signatures,
   names on hover, the stamp (`font-hand` class / `var(--font-hand)`).
@@ -58,6 +63,9 @@ Same mechanics, but **light, warm and practical**, in The Chefz identity:
 
 ### Page flow (single page, RTL)
 1. **Header** — The Chefz logo (start/right), links «اكتب رسالتك» «ابحث عن اسمك», gift pill.
+   Phones (< 768px): a 56px bar with logo + «اكتب رسالتك» + gift icon + `SoundToggle`
+   (the sound switch moves into the bar so it covers no buttons; from `md` it is
+   fixed at the bottom-end corner).
 2. **Hero** — full-bleed 3D field of floating folded letters (real letters from the
    wall). Centre: badge, title «كلنا كان لنا معلّم 💜», two lead lines, CTAs
    (write → `#write`, «اسمك موجود؟ 👀» → `#letters`), live counter, hint.
@@ -133,7 +141,7 @@ Same mechanics, but **light, warm and practical**, in The Chefz identity:
 | `src/lib/format.ts` | `displayTo`, `toLine` (memory aware), `shareTextFor`, `stampFor`, `fromName`, `formatCount`, `timeAgo`, `excerpt`, `toSceneLetter` |
 | `src/lib/api-client.ts` | browser fetch wrappers: `fetchMessages`, `fetchMessage`, `createMessage` (→ `status`), `likeMessage`, `reportMessage(id, reason, note?)` |
 | `src/lib/track.ts` | `track(event, params)` → GTM dataLayer |
-| `src/components/LettersProvider.tsx` | `LettersProvider` + `useLetters()` (open/close letter + URL sync, cache, likes, new-message pub/sub, prefill) |
+| `src/components/LettersProvider.tsx` | `LettersProvider` + `useLetters()` (open/close letter + URL sync, cache, likes, new-message pub/sub, prefill) + `useOpenLetter()` (the open letter + its prev/next; a separate context so opening one doesn't re-render the wall) |
 | `src/components/ui/Icon3D.tsx` | 3D icon with local → CDN → emoji fallback |
 | `src/app/globals.css` | tokens + component classes: `.container-page .btn .btn-primary .btn-plum .btn-ghost .icon-btn .field .field-label .field-optional .field-error .chip .paper .paper-plain .font-hand .eyebrow .stamp .visually-hidden` |
 
@@ -231,9 +239,10 @@ export async function shareOrDownloadStoryCard(m: PublicMessage): Promise<"share
 // ui-wall → src/components/wall/WallSection.tsx
 export function WallSection(props: { initial: ListResult; initialQuery?: string }): JSX.Element; // renders <section id="letters">
 // ui-wall → src/components/letter/LetterModal.tsx
-export function LetterModal(): JSX.Element | null; // reads useLetters().openMessage
+export function LetterModal(): JSX.Element | null; // reads useOpenLetter().openMessage
 // ui-wall → src/components/ui/LikeButton.tsx
-export function LikeButton(props: { message: PublicMessage; size?: "sm" | "md" }): JSX.Element;
+export function LikeButton(props: { message: PublicMessage; size?: "sm" | "md"; labelClassName?: string }): JSX.Element;
+  // labelClassName: extra classes for the visible label (the letter bar passes "max-[420px]:sr-only")
 
 // ui-shell → src/components/CampaignPage.tsx ("use client")
 export function CampaignPage(props: {

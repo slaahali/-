@@ -92,14 +92,27 @@ export function letterPalette(s: CardStyle): LetterPalette {
 /** How recent a click / tap / key must be for an open to count as user-initiated. */
 export const GESTURE_WINDOW_MS = 800;
 
-let lastGesture: { at: number; target: Element | null } = {
+/** A key press, a finger (touch / pen) or a mouse. */
+export type GestureKind = "key" | "touch" | "mouse";
+
+export function gestureKind(e: Event): GestureKind {
+  if (e.type.startsWith("key")) return "key";
+  return (e as PointerEvent).pointerType === "mouse" ? "mouse" : "touch";
+}
+
+let lastGesture: { at: number; target: Element | null; kind: GestureKind } = {
   at: Number.NEGATIVE_INFINITY,
   target: null,
+  kind: "mouse",
 };
 
-export function noteGesture(target: EventTarget | null, now: number = Date.now()) {
+export function noteGesture(
+  target: EventTarget | null,
+  now: number = Date.now(),
+  kind: GestureKind = "mouse",
+) {
   const el = typeof Element !== "undefined" && target instanceof Element ? target : null;
-  lastGesture = { at: now, target: el };
+  lastGesture = { at: now, target: el, kind };
 }
 
 /**
@@ -109,8 +122,8 @@ export function noteGesture(target: EventTarget | null, now: number = Date.now()
 export function recentGesture(
   now: number = Date.now(),
   ms = GESTURE_WINDOW_MS,
-): { target: Element | null } | null {
-  return now - lastGesture.at <= ms ? { target: lastGesture.target } : null;
+): { target: Element | null; kind: GestureKind } | null {
+  return now - lastGesture.at <= ms ? { target: lastGesture.target, kind: lastGesture.kind } : null;
 }
 
 // ------------------------------------------------------------------ swipes ---

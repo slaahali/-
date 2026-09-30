@@ -12,7 +12,7 @@
   isolation: isolate;
   display: flex;
   flex-direction: column;
-  padding: 1.35rem var(--pad) 0.35rem;
+  padding: 1.1rem var(--pad) 0.35rem;
   color: var(--card-ink);
   rotate: var(--tilt, 0deg);
   transition:
@@ -23,6 +23,7 @@
 @media (min-width: 640px) {
   .card {
     --pad: 1.4rem;
+    padding-top: 1.35rem;
   }
 }
 
@@ -97,11 +98,14 @@
     gap: 0.6rem;
   }
 }
-.card:focus-within {
+/* Visible focus only: a card focused again after its letter closes (by script,
+   after a tap) keeps its tilt. Not in a list with :hover: a browser without
+   :has() would drop the whole list. */
+.card:has(:focus-visible) {
+  z-index: 2;
   rotate: 0deg;
 }
-.card:hover,
-.card:focus-within {
+.card:hover {
   z-index: 2;
 }
 /* Keep an open share/report popover above the neighbouring cards. */
@@ -112,11 +116,11 @@
 /* ---- postage stamp (top-end corner) ---- */
 .stamp {
   position: absolute;
-  top: 0.9rem;
+  top: 0.75rem;
   inset-inline-end: 0.85rem;
   z-index: 0;
-  width: 54px;
-  height: 60px;
+  width: 48px;
+  height: 54px;
   rotate: -3deg;
   pointer-events: none;
 }
@@ -159,10 +163,10 @@
 }
 .postmark {
   position: absolute;
-  bottom: -15px;
+  bottom: -13px;
   inset-inline-end: -18px;
-  width: 96px;
-  height: 48px;
+  width: 84px;
+  height: 42px;
   color: color-mix(in oklab, var(--card-ink) 58%, transparent);
   mix-blend-mode: multiply;
   rotate: -9deg;
@@ -174,8 +178,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  min-height: 4.6rem;
-  padding-inline-end: 5.9rem;
+  min-height: 3.9rem;
+  padding-inline-end: 5.25rem;
 }
 .open {
   display: block;
@@ -206,13 +210,13 @@
 }
 .name {
   display: block;
-  font-size: 1.4rem;
+  font-size: 1.375rem;
   font-weight: 700;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 .school {
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   line-height: 1.5;
   color: var(--card-soft);
   overflow-wrap: anywhere;
@@ -222,7 +226,7 @@
 .crease {
   display: block;
   height: 2px;
-  margin: 0.9rem calc(-1 * var(--pad)) 0.85rem;
+  margin: 0.7rem calc(-1 * var(--pad)) 0.65rem;
   background: linear-gradient(
     to bottom,
     color-mix(in oklab, var(--card-ink) 9%, transparent),
@@ -231,7 +235,7 @@
 }
 
 .body {
-  font-size: 1.02rem;
+  font-size: 1rem;
   line-height: 1.95;
   white-space: pre-line;
   overflow-wrap: anywhere;
@@ -264,7 +268,7 @@
 }
 .signature {
   margin-inline-start: auto;
-  font-size: 1.35rem;
+  font-size: 1.25rem;
   line-height: 1.4;
   color: var(--card-accent-ink);
   overflow-wrap: anywhere;
@@ -278,8 +282,44 @@
   display: flex;
   align-items: center;
   gap: 0.1rem;
-  margin-top: 0.35rem;
+  margin-top: 0.1rem;
   margin-inline: calc(var(--ear) - var(--pad) + 0.55rem) -0.6rem;
+}
+
+/* Phones get a slimmer note (above); from 640px the original proportions. */
+@media (min-width: 640px) {
+  .stamp {
+    top: 0.9rem;
+    width: 54px;
+    height: 60px;
+  }
+  .postmark {
+    bottom: -15px;
+    width: 96px;
+    height: 48px;
+  }
+  .address {
+    min-height: 4.6rem;
+    padding-inline-end: 5.9rem;
+  }
+  .name {
+    font-size: 1.4rem;
+  }
+  .school {
+    font-size: 0.9rem;
+  }
+  .crease {
+    margin-block: 0.9rem 0.85rem;
+  }
+  .body {
+    font-size: 1.02rem;
+  }
+  .signature {
+    font-size: 1.35rem;
+  }
+  .actions {
+    margin-top: 0.35rem;
+  }
 }
 
 /* In-memory letters: calm — no tilt, no playful lift. */

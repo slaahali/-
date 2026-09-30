@@ -21,9 +21,12 @@ const BURST_COLORS = ["#eb652c", "#f7a64f", "#a73784", "#eb652c", "#f7a64f", "#a
 export function LikeButton({
   message,
   size = "md",
+  labelClassName,
 }: {
   message: PublicMessage;
   size?: "sm" | "md";
+  /** Extra classes for the visible «أعجبني» label (e.g. screen-reader only on narrow phones). */
+  labelClassName?: string;
 }) {
   const { isLiked, likeCount, toggleLike } = useLetters();
   const liked = isLiked(message.id);
@@ -150,7 +153,11 @@ export function LikeButton({
           </span>
         )}
       </span>
-      <span className={hideLabel ? "visually-hidden" : quiet ? "text-[0.85rem]" : undefined}>
+      <span
+        className={
+          hideLabel ? "visually-hidden" : quiet ? "text-[0.85rem]" : labelClassName || undefined
+        }
+      >
         {memory ? COPY.memoryLike : COPY.like}
       </span>
       {/* the space keeps the accessible name «أعجبني ١٢» instead of «أعجبني١٢» */}

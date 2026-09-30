@@ -25,7 +25,7 @@ export const PILL =
 
 /** Round share-target tile (icon over a short label), laid out in a row. */
 export const TILE =
-  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1.5 rounded-2xl px-1 pt-1.5 pb-2 text-[0.8rem] leading-tight font-bold text-plum transition-colors duration-150 hover:bg-plum-50/70 focus-visible:bg-plum-50/70";
+  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1.5 rounded-2xl px-1 pt-1.5 pb-2 text-caption leading-tight font-bold text-plum transition-colors duration-150 hover:bg-plum-50/70 focus-visible:bg-plum-50/70";
 export const TILE_ICON = "grid size-12 place-items-center rounded-full";
 
 const noopSubscribe = () => () => {};
@@ -265,7 +265,7 @@ function Panel({ anchorRef, onClose, id, label, subtitle, children }: Omit<Share
           role="dialog"
           aria-modal="true"
           aria-label={label}
-          className="absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto overscroll-contain rounded-t-[26px] bg-paper px-4 shadow-lift"
+          className="absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto overscroll-contain rounded-t-3xl bg-paper px-4 shadow-lift"
           style={{ paddingBottom: "max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem))" }}
         >
           <div

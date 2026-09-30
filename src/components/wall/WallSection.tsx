@@ -104,7 +104,7 @@ export function WallSection({
       <section
         id="letters"
         aria-labelledby="wall-title"
-        className={`${styles.section} scroll-mt-16 py-16 sm:py-24`}
+        className={`${styles.section} pt-8 pb-12 sm:scroll-mt-16 sm:py-24`}
       >
         <div className="container-page">
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:items-end lg:gap-12">
@@ -117,11 +117,11 @@ export function WallSection({
               )}
               <h2
                 id="wall-title"
-                className="text-[2.35rem] leading-[1.2] font-bold text-plum sm:text-5xl"
+                className="text-h2 leading-[1.2] font-bold text-plum sm:text-5xl"
               >
                 {COPY.wallTitle}
               </h2>
-              <p className="mt-2 text-[1.2rem] leading-snug font-bold text-ink sm:text-[1.55rem]">
+              <p className="mt-2 text-letter leading-snug font-bold text-ink sm:text-[1.55rem]">
                 {COPY.wallCta}
               </p>
             </header>
@@ -139,7 +139,7 @@ export function WallSection({
           </p>
 
           {!settledEmpty && (
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line pb-1 sm:mt-8">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line pb-1 sm:mt-8">
               <div className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                 {searching && !empty && (
                   <>
@@ -154,7 +154,7 @@ export function WallSection({
             </div>
           )}
 
-          <div id={RESULTS_ID} aria-busy={loading || loadingMore} className="mt-6">
+          <div id={RESULTS_ID} aria-busy={loading || loadingMore} className="mt-4 sm:mt-6">
             {listFailed && <ErrorBanner onRetry={wall.retry} />}
 
             {loading && empty ? (
@@ -166,7 +166,7 @@ export function WallSection({
             ) : (
               <ul
                 role="list"
-                className={`columns-1 gap-6 pt-5 transition-opacity duration-300 sm:columns-2 lg:columns-3 lg:gap-7 ${
+                className={`columns-1 gap-6 pt-3 transition-opacity duration-300 sm:columns-2 sm:pt-5 lg:columns-3 lg:gap-7 ${
                   loading ? "opacity-45 delay-150" : ""
                 }`}
               >
@@ -246,7 +246,7 @@ function SortControl({ value, onChange }: { value: SortMode; onChange: (s: SortM
     { value: "top", label: COPY.sortTop },
   ];
   return (
-    <div role="group" aria-label="ترتيب الرسائل" className="-me-2 flex shrink-0 items-center">
+    <div role="group" aria-label="ترتيب الرسائل" className="-me-2 ms-auto flex shrink-0 items-center">
       {options.map((o) => {
         const on = value === o.value;
         return (
@@ -331,7 +331,7 @@ function Invitation({ q, onWrite }: { q: string; onWrite: (toName: string) => vo
   return (
     <div className={`${styles.invite} mx-auto max-w-3xl px-5 pt-8 pb-9 text-center sm:px-12 sm:pt-10 sm:pb-12`}>
       <Icon3D name="envelope" size={132} className="mx-auto" />
-      <h3 className="mt-4 text-[1.85rem] leading-tight font-bold text-plum sm:text-[2.4rem]">
+      <h3 className="mt-4 text-h3 leading-tight font-bold text-plum sm:text-[2.4rem]">
         {COPY.emptySearchTitle}
       </h3>
       <p className="mx-auto mt-3 max-w-md text-lg leading-relaxed font-bold text-ink sm:text-[1.3rem]">

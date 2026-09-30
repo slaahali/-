@@ -17,6 +17,29 @@
   -webkit-overflow-scrolling: touch;
   /* Horizontal drags are ours (prev/next), not the browser's back gesture. */
   touch-action: pan-y pinch-zoom;
+  /* How long the letter's pieces wait for the table to cover the page. */
+  --enter: 0s;
+}
+/* First open: the table covers the page first, then the letter unfolds on it
+   (steps inside the view start at once). */
+.overlay[data-entering] {
+  --enter: 0.16s;
+}
+/* Focused on open so Tab starts inside; the dialog itself shows no ring. */
+.overlay:focus {
+  outline: none;
+}
+/* Closing, the opening in reverse: the letter lifts off the table, then the
+   table fades from the page (letter and page never show through each other).
+   The page isn't live again until the view unmounts. */
+.overlay[data-closing] {
+  animation: fade-out 0.11s ease-in 0.09s forwards;
+}
+.overlay[data-closing] > * {
+  animation: fade-out 0.11s ease-in forwards;
+}
+.overlay[data-closing] * {
+  pointer-events: none;
 }
 /* On a pseudo-element: a background layer with effects on the scroll container
    itself would become the containing block of the fixed chrome. */
@@ -30,7 +53,7 @@
     radial-gradient(64rem 30rem at 50% -6rem, color-mix(in srgb, var(--accent) 15%, transparent), transparent 72%),
     radial-gradient(36rem 26rem at 0% 100%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%),
     var(--table);
-  animation: fade-in 0.28s ease-out both;
+  animation: fade-in 0.16s ease-out both;
 }
 
 /* ---- chrome ---- */
@@ -47,16 +70,18 @@
 }
 .topBtn {
   pointer-events: auto;
+  /* fixed: a drag here would scroll the page behind, not the letter */
+  touch-action: none;
   border-color: rgb(105 29 78 / 0.16);
   background: rgb(255 253 248 / 0.96);
   box-shadow: 0 8px 20px -12px rgb(60 20 40 / 0.45);
-  animation: fade-in 0.28s ease-out both;
+  animation: fade-in 0.28s ease-out var(--enter) both;
 }
 .close {
   display: grid;
   place-items: center;
-  width: 3rem;
-  height: 3rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 50%;
   border: 1.5px solid rgb(105 29 78 / 0.28);
   color: var(--color-plum, #691d4e);
@@ -65,10 +90,12 @@
     border-color 0.2s,
     background-color 0.2s;
 }
-.close:hover {
-  rotate: 90deg;
-  border-color: var(--color-plum, #691d4e);
-  background: #fff;
+@media (hover: hover) {
+  .close:hover {
+    rotate: 90deg;
+    border-color: var(--color-plum, #691d4e);
+    background: #fff;
+  }
 }
 .close:focus-visible {
   border-radius: 50%;
@@ -88,16 +115,18 @@
   background: rgb(255 253 248 / 0.9);
   color: var(--color-plum, #691d4e);
   box-shadow: 0 10px 24px -14px rgb(60 20 40 / 0.5);
-  animation: fade-in 0.28s ease-out both;
+  animation: fade-in 0.28s ease-out var(--enter) both;
   transition:
     border-color 0.2s,
     background-color 0.2s,
     scale 0.2s var(--ease);
 }
-.nav:hover {
-  border-color: var(--color-plum, #691d4e);
-  background: #fff;
-  scale: 1.06;
+@media (hover: hover) {
+  .nav:hover {
+    border-color: var(--color-plum, #691d4e);
+    background: #fff;
+    scale: 1.06;
+  }
 }
 .nav:focus-visible {
   border-radius: 50%;
@@ -115,7 +144,8 @@
   min-height: 100%;
   flex-direction: column;
   align-items: center;
-  padding: calc(4.5rem + env(safe-area-inset-top)) 1rem calc(6rem + env(safe-area-inset-bottom));
+  /* phones and tablets: the envelope sits just under the ✕ / sound buttons */
+  padding: calc(3.75rem + env(safe-area-inset-top)) 1rem calc(6rem + env(safe-area-inset-bottom));
 }
 .stack {
   position: relative;
@@ -124,13 +154,27 @@
 }
 
 /* ---- envelope (opened, lying behind the sheet) ---- */
+/* Registered colours, so a step blends the envelope into the next letter's. */
+@property --env {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --env-in {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
 .envelope {
-  --flap: 3.75rem;
+  --flap: 2.75rem;
   position: relative;
   width: 88%;
-  height: 8.9rem;
+  height: 6.25rem;
   margin-inline: auto;
   filter: drop-shadow(0 12px 16px rgb(60 20 40 / 0.16));
+  transition:
+    --env 0.35s ease,
+    --env-in 0.35s ease;
 }
 .envFlap {
   position: absolute;
@@ -160,7 +204,7 @@
     linear-gradient(172deg, color-mix(in srgb, var(--env) 86%, #fff), var(--env) 70%);
 }
 .envIn {
-  animation: env-in 0.5s var(--ease) backwards;
+  animation: env-in 0.5s var(--ease) var(--enter) backwards;
 }
 @keyframes env-in {
   from {
@@ -170,10 +214,15 @@
 }
 
 /* ---- the sheet ---- */
-.paperStack {
+.sheets {
   position: relative;
   z-index: 1;
-  margin-top: -2.75rem;
+  margin-top: -2rem;
+}
+.paperStack {
+  position: relative;
+  /* one layer per letter: the fold and seal of the next never rise above the one sliding off */
+  isolation: isolate;
   /* cqw = the sheet's width: the triangle fold is 5:4, like the scene's letters */
   container-type: inline-size;
 }
@@ -230,13 +279,17 @@
 }
 
 /* ---- address block ---- */
+/* Phones and tablets: the stamp sits in the top-end corner beside the address
+   (like the wall cards), not in a band of its own above it. */
 .head {
   position: relative;
-  padding-top: 6.75rem;
+  min-height: 6.5rem;
+  padding-top: 1.25rem;
 }
 .address {
   display: flex;
   flex-direction: column;
+  padding-inline-end: 5.5rem;
   font-weight: 700;
 }
 .to {
@@ -245,25 +298,26 @@
   color: var(--accent-ink);
 }
 .name {
-  font-size: 1.9rem;
+  font-size: 1.625rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 .school {
   margin-top: 0.3rem;
-  font-size: 1.02rem;
+  padding-inline-end: 5.5rem;
+  font-size: 0.9375rem;
   line-height: 1.6;
   color: color-mix(in srgb, var(--letter-ink) 74%, var(--sheet));
   overflow-wrap: anywhere;
 }
 
-/* ---- postage stamp + postmark (top-start corner) ---- */
+/* ---- postage stamp + postmark (top-end corner on phones, top-start from 1024px) ---- */
 .postage {
   position: absolute;
-  top: 0.2rem;
-  inset-inline-start: 0;
-  width: 4.4rem;
-  height: 5.3rem;
+  top: 0.4rem;
+  inset-inline-end: 0;
+  width: 3.6rem;
+  height: 4.35rem;
   rotate: 2.5deg;
 }
 .postageFace {
@@ -306,9 +360,9 @@
 }
 .postmark {
   position: absolute;
-  bottom: -1.6rem;
-  inset-inline-start: 0.3rem;
-  width: 7.25rem;
+  bottom: -1.9rem;
+  inset-inline-end: -0.9rem;
+  width: 6rem;
   overflow: visible;
   color: rgb(58 36 50 / 0.68);
   rotate: -9deg;
@@ -326,10 +380,10 @@
 
 /* ---- body: ruled lines only behind the text, one per line box ---- */
 .body {
-  --lh: 2.05em;
-  margin-top: 1.4rem;
-  font-size: 1.2rem;
-  line-height: 2.05;
+  --lh: 2em;
+  margin-top: 1.1rem;
+  font-size: 1.125rem;
+  line-height: 2;
   white-space: pre-line;
   overflow-wrap: anywhere;
   background-image: linear-gradient(
@@ -345,17 +399,17 @@
 .closing {
   position: relative;
   display: flex;
-  min-height: 6rem;
+  min-height: 5rem;
   align-items: flex-end;
   justify-content: flex-end;
-  margin-top: 1.5rem;
+  margin-top: 1.1rem;
 }
 .sign {
   max-width: 62%;
   text-align: end;
 }
 .from {
-  font-size: 1.7rem;
+  font-size: 1.5rem;
   line-height: 1.35;
   color: var(--accent-ink);
   overflow-wrap: anywhere;
@@ -386,7 +440,7 @@
   pointer-events: none;
 }
 .rubberIn {
-  animation: rubber-in 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) 0.72s backwards;
+  animation: rubber-in 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) calc(0.72s + var(--enter)) backwards;
 }
 @keyframes rubber-in {
   from {
@@ -435,6 +489,10 @@
   height: 100%;
   object-fit: contain;
 }
+/* still loading: the drawn seal stands in */
+.sealImg[hidden] {
+  display: none;
+}
 
 /* ---- actions: a sticky bar on phones, a row under the sheet on desktop ---- */
 .actions {
@@ -445,14 +503,17 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.65rem 1rem calc(0.65rem + env(safe-area-inset-bottom));
+  /* max(), not +: the home-indicator inset already is the breathing room */
+  padding: 0.65rem 1rem max(0.65rem, env(safe-area-inset-bottom));
   /* opaque on purpose: a backdrop blur here repaints the whole view every frame */
   background: rgb(255 253 248 / 0.97);
   border-top: 1px solid rgb(105 29 78 / 0.1);
   box-shadow: 0 -14px 30px -22px rgb(60 20 40 / 0.4);
+  /* fixed: a drag here would scroll the page behind, not the letter */
+  touch-action: none;
 }
 .actionsIn {
-  animation: bar-in 0.45s var(--ease) 0.25s backwards;
+  animation: bar-in 0.45s var(--ease) calc(0.25s + var(--enter)) backwards;
 }
 @keyframes bar-in {
   from {
@@ -484,9 +545,15 @@
   padding-inline: 1rem;
   border-radius: 999px;
 }
-/* Memory letters have two actions: share the bar evenly. */
+/* The icons never give way to the labels (the gift's vanished at 360px). */
+.gift svg,
+.shareBtn svg {
+  flex-shrink: 0;
+}
+/* Memory letters have two actions: both grow from their own width, so
+   «دعوة بالرحمة» + its count stay on one line on a 360px phone. */
 .actionsPair > :not(.gift) {
-  flex: 1;
+  flex: 1 1 auto;
   justify-content: center;
 }
 .memory .postageIcon {
@@ -523,15 +590,21 @@
   color: var(--color-plum, #691d4e);
   transition: background-color 0.2s;
 }
-.stepBtn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.7);
+@media (hover: hover) {
+  .stepBtn:hover:not(:disabled) {
+    background: rgb(255 255 255 / 0.7);
+  }
 }
 .stepBtn:disabled {
   opacity: 0.35;
 }
 .stepHint {
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
   color: var(--color-ink-soft, #6b5462);
+}
+/* under the sheet: it arrives as the sheet opens, not over the page */
+.stepperIn {
+  animation: fade-in 0.35s ease-out calc(0.6s + var(--enter)) backwards;
 }
 
 /* ---- opening: the triangle-folded letter unfolds into the sheet ---- */
@@ -543,7 +616,9 @@
   aspect-ratio: 5 / 4;
   perspective: 1400px;
   pointer-events: none;
-  animation: fold-life 0.72s linear forwards;
+  will-change: transform, opacity;
+  /* both: hidden (not lying there unfolded) while it waits for the table */
+  animation: fold-life 0.72s linear var(--enter) both;
 }
 @keyframes fold-life {
   0% {
@@ -565,7 +640,7 @@
   position: absolute;
   inset: 10% 5% -5%;
   filter: blur(12px);
-  animation: shadow-out 0.72s linear forwards;
+  animation: shadow-out 0.72s linear var(--enter) both;
 }
 .foldShadow::before {
   content: "";
@@ -587,26 +662,40 @@
 .flap {
   position: absolute;
   inset: 0;
-  animation: 0.72s var(--ease-fold) both;
+  will-change: transform, opacity;
+  animation: 0.72s var(--ease-fold) var(--enter) both;
+}
+/* The shape is painted inside the turning layer: a clip-path on the 3D-turned
+   layer itself can flash unclipped in WebKit. */
+.flap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 /* Each flap turns 180° about its outer edge (the fold line) and lies flat outside the triangle. */
 .flapL {
-  clip-path: polygon(50% 0, 0 100%, 50% 65%);
   transform-origin: 50% 0;
-  background: linear-gradient(110deg, #fffefb 30%, #f4eee4);
   animation-name: flap-l;
 }
+.flapL::before {
+  clip-path: polygon(50% 0, 0 100%, 50% 65%);
+  background: linear-gradient(110deg, #fffefb 30%, #f4eee4);
+}
 .flapR {
-  clip-path: polygon(50% 0, 100% 100%, 50% 65%);
   transform-origin: 50% 0;
-  background: linear-gradient(250deg, #faf5ec 30%, #eee6da);
   animation-name: flap-r;
 }
+.flapR::before {
+  clip-path: polygon(50% 0, 100% 100%, 50% 65%);
+  background: linear-gradient(250deg, #faf5ec 30%, #eee6da);
+}
 .flapB {
-  clip-path: polygon(0 100%, 100% 100%, 50% 65%);
   transform-origin: 50% 100%;
-  background: linear-gradient(to top, #fbf7f0, #f1eadf);
   animation-name: flap-b;
+}
+.flapB::before {
+  clip-path: polygon(0 100%, 100% 100%, 50% 65%);
+  background: linear-gradient(to top, #fbf7f0, #f1eadf);
 }
 @keyframes flap-l {
   0%,
@@ -652,7 +741,7 @@
 }
 /* The sheet grows from the folded triangle to the full page underneath the flaps. */
 .unfold {
-  animation: sheet-unfold 0.72s var(--ease-fold) backwards;
+  animation: sheet-unfold 0.72s var(--ease-fold) var(--enter) backwards;
 }
 @keyframes sheet-unfold {
   0%,
@@ -665,18 +754,26 @@
     opacity: 1;
     clip-path: polygon(50% 0, 50% 0, 100% 80cqw, 0 80cqw);
   }
+  /* past the edges, so the sheet's shadow grows in rather than snapping on at the end */
   100% {
-    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    clip-path: polygon(
+      -2rem 0,
+      calc(100% + 2rem) 0,
+      calc(100% + 2rem) calc(100% + 3.5rem),
+      -2rem calc(100% + 3.5rem)
+    );
   }
 }
 /* The seal starts where the flaps meet (the fold centre), cracks, and settles on the top edge. */
 .sealTravel {
-  animation: seal-travel 0.72s var(--ease) backwards;
+  animation: seal-travel 0.72s var(--ease) var(--enter) backwards;
 }
 @keyframes seal-travel {
+  /* linear fade, in step with the fold's: the seal never shows before its letter */
   0% {
     opacity: 0;
     transform: translateY(calc(52cqw - 0.1rem)) scale(0.62);
+    animation-timing-function: linear;
   }
   14% {
     opacity: 1;
@@ -689,10 +786,10 @@
   }
 }
 .sealTravel .sealA {
-  animation: crack-a 0.72s var(--ease) backwards;
+  animation: crack-a 0.72s var(--ease) var(--enter) backwards;
 }
 .sealTravel .sealB {
-  animation: crack-b 0.72s var(--ease) backwards;
+  animation: crack-b 0.72s var(--ease) var(--enter) backwards;
 }
 @keyframes crack-a {
   0%,
@@ -715,7 +812,7 @@
 
 /* calm entries (memory letters, reduced motion): no flaps, no bounce */
 .sheetCalm {
-  animation: calm-in 0.6s ease-out backwards;
+  animation: calm-in 0.6s ease-out var(--enter) backwards;
 }
 @keyframes calm-in {
   from {
@@ -724,19 +821,124 @@
   }
 }
 .fadeIn {
-  animation: fade-in 0.5s ease-out backwards;
+  animation: fade-in 0.5s ease-out var(--enter) backwards;
 }
 .fadeLate {
-  animation: fade-in 0.6s ease-out 0.35s backwards;
+  animation: fade-in 0.6s ease-out calc(0.35s + var(--enter)) backwards;
 }
 @keyframes fade-in {
   from {
     opacity: 0;
   }
 }
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---- stepping: the letter on screen slides off the way the swipe went,
+   over the next one, which is already on the table unfolding ---- */
+.leaving {
+  position: absolute;
+  top: 0;
+  inset-inline: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.leaveNext {
+  animation: leave-next 0.34s cubic-bezier(0.4, 0, 0.9, 0.6) forwards;
+}
+.leavePrev {
+  animation: leave-prev 0.34s cubic-bezier(0.4, 0, 0.9, 0.6) forwards;
+}
+@keyframes leave-next {
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(60%) rotate(5deg);
+  }
+}
+@keyframes leave-prev {
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-60%) rotate(-5deg);
+  }
+}
+/* the next letter doesn't fade in from nothing: it's already lying there */
+.paperStack[data-step] .fold {
+  animation-name: fold-step;
+}
+.paperStack[data-step] .sealTravel {
+  animation-name: seal-step;
+}
+.paperStack[data-step] .sheetCalm,
+.paperStack[data-step] .fadeIn {
+  animation: none;
+}
+@keyframes fold-step {
+  0%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes seal-step {
+  0%,
+  36% {
+    transform: translateY(calc(52cqw - 0.1rem)) scale(0.62);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay[data-entering] {
+    --enter: 0s;
+  }
+  /* a 0.6 s wait with no fade would only make it pop in late */
+  .stepperIn {
+    animation: none;
+  }
+}
+
+/* Narrow phones: like · share · gift share the bar equally (the like label
+   turns screen-reader only, see LetterModal), so the orange gift is never the
+   squeezed one. */
+@media (max-width: 419.98px) {
+  .actions:not(.actionsPair) > :is(a, button) {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    padding-inline: 0.75rem;
+  }
+}
 
 /* ---- tablet / desktop ---- */
 @media (min-width: 640px) {
+  /* tablets: the stamp stays beside the address, at its earlier size */
+  .head {
+    min-height: 7.5rem;
+  }
+  .address,
+  .school {
+    padding-inline-end: 6.75rem;
+  }
+  .postage {
+    width: 4.4rem;
+    height: 5.3rem;
+  }
+  .postmark {
+    width: 7.25rem;
+  }
   .giftVerb {
     position: static;
     width: auto;
@@ -758,17 +960,30 @@
     /* nudged off-centre, but its corners stay tucked behind the sheet */
     translate: -0.6rem 0;
   }
-  .paperStack {
+  .sheets {
     margin-top: -7.25rem;
   }
   .sheet {
     padding: 2.5rem 3rem 0.75rem;
     rotate: 0.4deg;
   }
+  .close {
+    width: 3rem;
+    height: 3rem;
+  }
+  /* the stamp back in the top-start corner, above the address */
   .head {
+    min-height: 0;
     padding-top: 8.75rem;
   }
+  .address,
+  .school {
+    padding-inline-end: 0;
+  }
   .postage {
+    top: 0.2rem;
+    inset-inline-start: 0;
+    inset-inline-end: auto;
     width: 5.6rem;
     height: 6.7rem;
   }
@@ -776,6 +991,8 @@
     padding: 0.5rem;
   }
   .postmark {
+    inset-inline-start: 0.3rem;
+    inset-inline-end: auto;
     width: 8.75rem;
     bottom: -2rem;
   }
@@ -790,8 +1007,14 @@
     font-size: 1.1rem;
   }
   .body {
+    --lh: 2.05em;
     margin-top: 1.75rem;
     font-size: 1.35rem;
+    line-height: 2.05;
+  }
+  .closing {
+    min-height: 6rem;
+    margin-top: 1.5rem;
   }
   .from {
     font-size: 2rem;
@@ -816,9 +1039,10 @@
     background: none;
     border: 0;
     box-shadow: none;
+    touch-action: auto;
   }
   .actionsIn {
-    animation: fade-in 0.45s ease-out 0.45s backwards;
+    animation: fade-in 0.45s ease-out calc(0.45s + var(--enter)) backwards;
   }
   .gift {
     flex: none;

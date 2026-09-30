@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
   type FormEvent,
 } from "react";
-import { useLetters } from "@/components/LettersProvider";
+import { useLetters, useOpenLetter } from "@/components/LettersProvider";
 import {
   CheckGlyph,
   CloseGlyph,
@@ -123,7 +123,8 @@ export function ReportButton({
 }
 
 function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed: () => void }) {
-  const { openMessage, closeLetter } = useLetters();
+  const { closeLetter } = useLetters();
+  const { openMessage } = useOpenLetter();
   const ref = useRef<HTMLDialogElement>(null);
   const hiddenRef = useRef(false);
   const closedRef = useRef(false);
@@ -194,7 +195,7 @@ function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed:
       onClick={(e) => {
         if (downOnBackdrop.current && e.target === e.currentTarget) close();
       }}
-      className="fixed inset-0 m-0 mt-auto h-fit max-h-[92dvh] w-full max-w-none overflow-y-auto overscroll-contain rounded-t-[28px] border-0 bg-paper p-0 text-start font-sans text-base leading-relaxed text-ink shadow-[0_-20px_60px_-20px_rgb(43_10_32/0.45)] backdrop:bg-plum-950/45 backdrop:backdrop-blur-[3px] sm:m-auto sm:max-w-md sm:rounded-[28px] sm:shadow-[0_30px_80px_-24px_rgb(43_10_32/0.55)]"
+      className="fixed inset-0 m-0 mt-auto h-fit max-h-[92dvh] w-full max-w-none overflow-y-auto overscroll-contain rounded-t-3xl border-0 bg-paper p-0 text-start font-sans text-base leading-relaxed text-ink shadow-[0_-20px_60px_-20px_rgb(43_10_32/0.45)] backdrop:bg-plum-950/45 backdrop:backdrop-blur-[3px] sm:m-auto sm:max-w-md sm:rounded-[28px] sm:shadow-[0_30px_80px_-24px_rgb(43_10_32/0.55)]"
     >
       <div className="px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-7 sm:pt-6 sm:pb-7">
         <div
@@ -287,7 +288,7 @@ function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed:
                 placeholder="تبي توضّح لنا أكثر؟"
                 className="field min-h-24 resize-none leading-relaxed"
               />
-              <p className="mt-1 text-end text-xs text-ink-mute tabular-nums">
+              <p className="mt-1 text-end text-caption text-ink-mute tabular-nums">
                 {note.length}/{NOTE_MAX}
               </p>
             </div>

@@ -428,7 +428,7 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
       aria-label="رسالتك لمعلمك"
       onSubmit={handleSubmit}
       inert={sending}
-      className="relative scroll-mt-24"
+      className="relative sm:scroll-mt-24"
     >
       <div
         className={styles.stage}
@@ -632,7 +632,7 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
             />
             <span className="min-w-0">
               <span className="block font-bold text-plum">{COPY.labelMemory}</span>
-              <span id={id("memory-hint")} className="block text-[0.95rem] leading-7 text-ink-soft">
+              <span id={id("memory-hint")} className="block text-[0.95rem] leading-7 text-ink-soft max-sm:text-balance">
                 {COPY.memoryHint}
               </span>
             </span>
@@ -815,7 +815,8 @@ function EnvelopePicker({
           const i = roveRadio(e);
           if (i !== null) onPick(i);
         }}
-        className={`mt-2 flex flex-wrap gap-1.5 transition-[opacity,filter] duration-300 ${
+        // Phones: the six envelopes span the row, edge to edge, instead of bunching at the start.
+        className={`mt-2 flex max-w-[26rem] justify-between gap-1 transition-[opacity,filter] duration-300 sm:max-w-none sm:flex-wrap sm:justify-start sm:gap-1.5 ${
           inMemory ? "opacity-45 grayscale" : ""
         }`}
       >
@@ -938,7 +939,7 @@ function BodyField({
         <span
           aria-hidden
           dir="ltr"
-          className={`mt-1.5 shrink-0 text-[0.8rem] font-bold tabular-nums transition-colors ${
+          className={`mt-1.5 shrink-0 text-caption font-bold tabular-nums transition-colors ${
             count > BODY_WARN_AT ? "text-orange-700" : "text-ink-mute"
           }`}
         >

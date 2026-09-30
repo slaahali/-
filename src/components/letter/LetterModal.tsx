@@ -8,9 +8,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type TouchEvent as ReactTouchEvent,
 } from "react";
-import { useLetters } from "@/components/LettersProvider";
+import { useLetters, useOpenLetter, type OpenLetterValue } from "@/components/LettersProvider";
 import { ShareMenu } from "@/components/share/ShareMenu";
 import { LikeButton } from "@/components/ui/LikeButton";
 import { ReportButton } from "@/components/ui/ReportButton";
@@ -24,7 +25,14 @@ import { play } from "@/lib/sound";
 import { track } from "@/lib/track";
 import type { PublicMessage } from "@/lib/types";
 import { ArrowGlyph, CloseGlyph, GiftGlyph } from "./glyphs";
-import { classifySwipe, hasLongRun, letterPalette, noteGesture, recentGesture } from "./letter-utils";
+import {
+  classifySwipe,
+  gestureKind,
+  hasLongRun,
+  letterPalette,
+  noteGesture,
+  recentGesture,
+} from "./letter-utils";
 import { PostageStamp } from "./PostageStamp";
 import { WaxSeal } from "./WaxSeal";
 import styles from "./letter.module.css";
@@ -53,14 +61,34 @@ const SELF_SOUNDING_OPENERS = "#letters, [data-immersive], canvas";
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** none: server-rendered from /m/:id (already on screen). calm: memory letters, reduced motion. */
+type Entry = "none" | "calm" | "full";
+
+/** When each entry has finished playing (ms after the open, the table's fade included). */
+const SETTLED_MS: Record<Entry, number> = { none: 0, calm: 1200, full: 1400 };
+/** The view's fade-out on close (letter.module.css [data-closing]), plus slack. */
+const CLOSE_MS = 400;
+/** Longest a letter stepped away from may take to slide off (its animationend normally ends it). */
+const LEAVE_MS = 800;
+
+/**
+ * The page's classic scrollbar width (0 with overlay scrollbars). Measured ahead
+ * of time: reading it while opening would force a layout of the view React has
+ * just inserted, inside the tap.
+ */
+let pageScrollbar = 0;
+
 /** The opened-letter view. Renders nothing while no letter is open. */
 export function LetterModal() {
-  const { openMessage } = useLetters();
+  const open = useOpenLetter();
+  // The last letter (and its prev / next) stays on screen while the view fades out after closing.
+  const [onScreen, setOnScreen] = useState(open);
+  if (open.openMessage && open !== onScreen) setOnScreen(open);
 
   // Remember the last click / tap / key press, so an open can tell a visitor's
   // gesture (→ paper sound) from a deep link or the back button (→ silence).
   useEffect(() => {
-    const note = (e: Event) => noteGesture(e.target);
+    const note = (e: Event) => noteGesture(e.target, Date.now(), gestureKind(e));
     const opts = { capture: true, passive: true } as const;
     // pointerup too: a slow swipe steps on touchend, well after its pointerdown.
     const types = ["pointerdown", "pointerup", "keydown"] as const;
@@ -70,13 +98,31 @@ export function LetterModal() {
     };
   }, []);
 
-  if (!openMessage) return null;
-  return <LetterView m={openMessage} />;
+  useEffect(() => {
+    const html = document.documentElement;
+    const measure = () => {
+      // Not while the page's scroll is locked: its scrollbar is gone then.
+      if (html.style.overflow !== "hidden") pageScrollbar = window.innerWidth - html.clientWidth;
+    };
+    measure();
+    window.addEventListener("resize", measure, { passive: true });
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  if (!onScreen.openMessage) return null;
+  return (
+    <LetterView
+      m={onScreen.openMessage}
+      neighbours={onScreen.neighbours}
+      closing={!open.openMessage}
+      onClosed={() => setOnScreen(open)}
+    />
+  );
 }
 
-/** Makes everything outside `el` inert (so only the dialog is reachable). Returns what it changed. */
-function inertOutside(el: HTMLElement): HTMLElement[] {
-  const changed: HTMLElement[] = [];
+/** Everything on the page outside `el` (made inert once the view is up, so only the dialog is reachable). */
+function pageOutside(el: HTMLElement): HTMLElement[] {
+  const found: HTMLElement[] = [];
   let node: HTMLElement = el;
   while (node.parentElement && node !== document.body) {
     const parent: HTMLElement = node.parentElement;
@@ -84,12 +130,11 @@ function inertOutside(el: HTMLElement): HTMLElement[] {
       if (sib === node || !(sib instanceof HTMLElement) || sib.inert) continue;
       if (sib.tagName === "SCRIPT" || sib.tagName === "STYLE" || sib.tagName === "TEMPLATE")
         continue;
-      sib.inert = true;
-      changed.push(sib);
+      found.push(sib);
     }
     node = parent;
   }
-  return changed;
+  return found;
 }
 
 function focusablesIn(root: HTMLElement): HTMLElement[] {
@@ -133,11 +178,24 @@ function restoreFocus(opener: HTMLElement | null, slot: Slot | null, openerRemov
   heading.focus(opts);
 }
 
-function LetterView({ m }: { m: PublicMessage }) {
-  const { closeLetter, neighbours, openLetter } = useLetters();
+/** A letter stepped away from, sliding off the way the swipe went. */
+type Leaving = { m: PublicMessage; key: number; dir: "next" | "prev" };
+
+function LetterView({
+  m,
+  neighbours,
+  closing,
+  onClosed,
+}: {
+  m: PublicMessage;
+  neighbours: OpenLetterValue["neighbours"];
+  /** Closed: fading out before it unmounts. */
+  closing: boolean;
+  onClosed: () => void;
+}) {
+  const { closeLetter, openLetter } = useLetters();
   const overlayRef = useRef<HTMLDivElement>(null);
   const stackRef = useRef<HTMLDivElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
   const touchRef = useRef<{ x: number; y: number; t: number; canClose: boolean } | null>(null);
   const removedRef = useRef(new Set<string>());
   const playedRef = useRef<string | null>(null);
@@ -150,16 +208,33 @@ function LetterView({ m }: { m: PublicMessage }) {
   const memory = m.inMemory;
   const calm = memory || reduced;
   const female = m.title === "ustadha" || m.title === "dr_f";
-  const signer = fromName(m);
 
   // A letter server-rendered from /m/:id is already on screen: don't replay the
   // entry after hydration. Client opens and prev/next steps do animate.
   const [openedOnClient] = useState(hydrated);
   const [firstId] = useState(m.id);
-  const entry: "none" | "calm" | "full" =
-    !openedOnClient && m.id === firstId ? "none" : calm ? "calm" : "full";
-  const pick = (full: string, calmCls: string) =>
-    entry === "full" ? full : entry === "calm" ? calmCls : "";
+  const entry: Entry = !openedOnClient && m.id === firstId ? "none" : calm ? "calm" : "full";
+  // The table, the envelope and the chrome come in once, with the first letter.
+  const [openEntry] = useState(entry);
+  const enter = (full: string, calmCls: string) =>
+    openEntry === "full" ? full : openEntry === "calm" ? calmCls : "";
+
+  // Stepping: the letter on screen slides off while the next one unfolds under
+  // it, so the table is never left empty. Keys are per step, so the letter
+  // sliding off keeps its DOM (and loaded images) and a revisited one starts fresh.
+  const [shown, setShown] = useState({ m, key: 0 });
+  const [leaving, setLeaving] = useState<Leaving | null>(null);
+  if (shown.m.id !== m.id) {
+    setShown({ m, key: shown.key + 1 });
+    setLeaving({ m: shown.m, key: shown.key, dir: neighbours.next === shown.m.id ? "prev" : "next" });
+  }
+  const stepKey = shown.key;
+
+  useEffect(() => {
+    if (!leaving) return;
+    const t = window.setTimeout(() => setLeaving(null), LEAVE_MS);
+    return () => window.clearTimeout(t);
+  }, [leaving]);
 
   // The paper sound belongs to the visitor's click; deep links stay silent.
   // Layout effect: for a click-open this still runs inside the click's task.
@@ -182,14 +257,16 @@ function LetterView({ m }: { m: PublicMessage }) {
     return () => window.removeEventListener(LETTER_HIDDEN_EVENT, onHidden);
   }, []);
 
-  // Open: remember the opener, lock page scroll, make the page inert, focus ✕.
-  // Close (unmount): undo all of it and give focus back.
+  // Open: remember the opener, lock page scroll, focus the dialog and, once the
+  // entry has played, make the page inert. Close (unmount): undo all of it and
+  // give focus back.
   useLayoutEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
+    const gesture = recentGesture();
     const active = document.activeElement;
     // Safari doesn't focus a clicked button: fall back to what was just pressed.
-    const pressed = recentGesture()?.target?.closest<HTMLElement>(FOCUSABLE) ?? null;
+    const pressed = gesture?.target?.closest<HTMLElement>(FOCUSABLE) ?? null;
     const opener =
       active instanceof HTMLElement && active !== document.body
         ? active
@@ -200,26 +277,55 @@ function LetterView({ m }: { m: PublicMessage }) {
     const removed = removedRef.current;
     const html = document.documentElement;
     const prev = { overflow: html.style.overflow, gutter: html.style.scrollbarGutter };
-    const hadScrollbar = window.innerWidth > html.clientWidth;
     html.style.overflow = "hidden";
-    if (hadScrollbar) html.style.scrollbarGutter = "stable";
-    const inerted = inertOutside(overlay);
-    closeRef.current?.focus({ preventScroll: true });
+    if (pageScrollbar > 0) html.style.scrollbarGutter = "stable";
+    // The dialog itself rather than ✕: Safari rings a button focused by script
+    // after a tap. Tab goes on to ✕ and the rest.
+    overlay.focus({ preventScroll: true });
+    // `inert` restyles the whole page, so not inside the tap: the table covers
+    // the page meanwhile, and onKeyDown already keeps Tab inside.
+    const page = pageOutside(overlay);
+    const inerted: HTMLElement[] = [];
+    const settle = window.setTimeout(() => {
+      for (const el of page) {
+        if (!el.isConnected || el.inert) continue;
+        el.inert = true;
+        inerted.push(el);
+      }
+    }, SETTLED_MS[openEntry]);
     return () => {
+      window.clearTimeout(settle);
       html.style.overflow = prev.overflow;
       html.style.scrollbarGutter = prev.gutter;
       for (const el of inerted) el.inert = false;
+      // Opened and closed with a finger: nobody is steering by focus, and Safari
+      // would ring the card. Keyboard and mouse visitors get it back.
+      if (gesture?.kind === "touch" && recentGesture()?.kind !== "key") return;
       restoreFocus(opener, slot, Boolean(slot) && removed.has(firstId));
     };
-  }, [firstId]);
+  }, [firstId, openEntry]);
+
+  // Close: the view fades out (onAnimationEnd below), then unmounts. The timer
+  // is for when animations don't run at all.
+  const fadedOut = useEffectEvent(onClosed);
+  useEffect(() => {
+    if (!closing) return;
+    const t = window.setTimeout(() => fadedOut(), CLOSE_MS);
+    return () => window.clearTimeout(t);
+  }, [closing]);
 
   // Stepping to another letter starts at the top.
-  useEffect(() => {
-    overlayRef.current?.scrollTo({ top: 0 });
-  }, [m.id]);
+  useLayoutEffect(() => {
+    if (stepKey > 0) overlayRef.current?.scrollTo({ top: 0 });
+  }, [stepKey]);
 
   const step = (id: string | null) => {
-    if (id) openLetter(id);
+    if (!id || closing) return;
+    // Focus inside the sheet that is about to slide off (and turn inert) stays in the dialog.
+    if (stackRef.current?.contains(document.activeElement)) {
+      overlayRef.current?.focus({ preventScroll: true });
+    }
+    openLetter(id);
   };
 
   /** Inside a nested dialog (report sheet, portalled share popover) rather than the letter itself. */
@@ -252,7 +358,7 @@ function LetterView({ m }: { m: PublicMessage }) {
       const last = items[items.length - 1];
       if (
         !root.contains(active) ||
-        (e.shiftKey && active === first) ||
+        (e.shiftKey && (active === first || active === root)) ||
         (!e.shiftKey && active === last)
       ) {
         e.preventDefault();
@@ -331,14 +437,11 @@ function LetterView({ m }: { m: PublicMessage }) {
     if (action) step(action === "next" ? neighbours.next : neighbours.prev);
   };
 
+  // The sheets carry their own colours (a letter sliding off keeps its own).
   const vars = {
     "--accent": s.accent,
-    "--accent-ink": palette.accentInk,
-    "--stamp-ink": palette.stampInk,
-    "--letter-ink": s.ink,
     "--env": palette.envelope,
     "--env-in": palette.envelopeInside,
-    "--stamp-field": palette.stampField,
   } as CSSProperties;
 
   return (
@@ -347,7 +450,10 @@ function LetterView({ m }: { m: PublicMessage }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className={`${styles.overlay} ${memory ? styles.memory : ""}`}
+      tabIndex={-1}
+      data-entering={openEntry !== "none" && stepKey === 0 ? "" : undefined}
+      data-closing={closing ? "" : undefined}
+      className={styles.overlay}
       style={vars}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
@@ -356,11 +462,13 @@ function LetterView({ m }: { m: PublicMessage }) {
         touchRef.current = null;
         setPull(0);
       }}
+      onAnimationEnd={(e) => {
+        if (closing && e.target === e.currentTarget && !e.pseudoElement) onClosed();
+      }}
     >
       <div className={styles.topBar}>
         <SoundToggle className={styles.topBtn} />
         <button
-          ref={closeRef}
           type="button"
           onClick={closeLetter}
           aria-label="إغلاق الرسالة"
@@ -393,66 +501,36 @@ function LetterView({ m }: { m: PublicMessage }) {
 
       <div className={styles.stage}>
         <div ref={stackRef} className={styles.stack}>
-          {/* Keyed parts replay their entry when stepping between letters. */}
           <div
-            key={`env-${m.id}`}
             aria-hidden="true"
             data-pull-close
-            className={`${styles.envelope} ${pick(styles.envIn, styles.fadeIn)}`}
+            className={`${styles.envelope} ${enter(styles.envIn, styles.fadeIn)}`}
           >
             <span className={styles.envFlap} />
             <span className={styles.envBody} />
           </div>
 
-          <div key={m.id} className={styles.paperStack}>
-            <article
-              aria-labelledby={titleId}
-              className={`${styles.sheet} ${pick(styles.unfold, styles.sheetCalm)}`}
-            >
-              <header className={styles.head} data-pull-close>
-                <PostageStamp icon={s.icon} year={postmarkYear(m.createdAt)} />
-                <h2 id={titleId} className={styles.address}>
-                  <span className={styles.to}>{memory ? "إلى روح" : "إلى"}</span>{" "}
-                  <span className={styles.name}>{displayTo(m)}</span>
-                </h2>
-                {m.school && <p className={styles.school}>{m.school}</p>}
-              </header>
-
-              <div className={styles.body}>{m.body}</div>
-
-              <footer className={styles.closing}>
-                <div className={styles.sign}>
-                  <p className={`${hasLongRun(signer) ? "" : "font-hand"} ${styles.from}`}>
-                    <span aria-hidden="true" className={styles.dash}>
-                      —
-                    </span>
-                    {signer}
-                  </p>
-                  <time dateTime={m.createdAt} className={styles.date}>
-                    {(hydrated && formatDate(m.createdAt)) || " "}
-                  </time>
-                </div>
-                <span className={`stamp ${styles.rubber} ${pick(styles.rubberIn, styles.fadeLate)}`}>
-                  {stampFor(m)}
-                </span>
-              </footer>
-
-              <div className={styles.sheetEnd}>
-                <ReportButton message={m} />
-              </div>
-            </article>
-
-            <WaxSeal
-              m={m}
-              color={memory ? "#a99fb3" : s.accent}
-              className={pick(styles.sealTravel, styles.fadeIn)}
-            />
-            {entry === "full" && <FoldingLetter />}
+          <div className={styles.sheets}>
+            {leaving && (
+              <LetterPaper
+                key={leaving.key}
+                m={leaving.m}
+                entry="none"
+                leave={leaving.dir}
+                onLeft={() => setLeaving(null)}
+              />
+            )}
+            <LetterPaper key={stepKey} m={m} entry={entry} titleId={titleId} stepped={stepKey > 0}>
+              {entry === "full" && <FoldingLetter />}
+            </LetterPaper>
           </div>
         </div>
 
         {(neighbours.prev || neighbours.next) && (
-          <nav aria-label="التنقل بين الرسائل" className={styles.stepper}>
+          <nav
+            aria-label="التنقل بين الرسائل"
+            className={`${styles.stepper} ${openEntry === "none" ? "" : styles.stepperIn}`}
+          >
             <button
               type="button"
               disabled={!neighbours.prev}
@@ -476,10 +554,17 @@ function LetterView({ m }: { m: PublicMessage }) {
         )}
 
         <div
-          className={`${styles.actions} ${memory ? styles.actionsPair : ""} ${entry === "none" ? "" : styles.actionsIn}`}
+          className={`${styles.actions} ${memory ? styles.actionsPair : ""} ${openEntry === "none" ? "" : styles.actionsIn}`}
           data-no-swipe
         >
-          <LikeButton message={m} size="md" />
+          {/* Under 420px the three actions share the bar equally: the like keeps its
+              heart and count, its word stays for screen readers. Memory letters
+              have two actions and keep «دعوة بالرحمة». */}
+          <LikeButton
+            message={m}
+            size="md"
+            labelClassName={memory ? undefined : "max-[420px]:sr-only"}
+          />
           <ShareMenu message={m} mode="compact" className={styles.shareBtn} />
           {!memory && (
             <a
@@ -499,6 +584,107 @@ function LetterView({ m }: { m: PublicMessage }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One letter on the table, in its own colours: the unfolded sheet and its broken seal. */
+function LetterPaper({
+  m,
+  entry,
+  titleId,
+  stepped = false,
+  leave,
+  onLeft,
+  children,
+}: {
+  m: PublicMessage;
+  entry: Entry;
+  /** Only the letter on screen names the dialog. */
+  titleId?: string;
+  /** Arrived by a step: its triangle is already on the table, under the letter sliding off. */
+  stepped?: boolean;
+  /** Stepped away from: slides off towards this side, then goes. */
+  leave?: "next" | "prev";
+  onLeft?: () => void;
+  children?: ReactNode;
+}) {
+  const hydrated = useHydrated();
+  const s = cardStyle(m);
+  const palette = letterPalette(s);
+  const memory = m.inMemory;
+  const signer = fromName(m);
+  const pick = (full: string, calmCls: string) =>
+    entry === "full" ? full : entry === "calm" ? calmCls : "";
+
+  const vars = {
+    "--accent": s.accent,
+    "--accent-ink": palette.accentInk,
+    "--stamp-ink": palette.stampInk,
+    "--letter-ink": s.ink,
+    "--stamp-field": palette.stampField,
+  } as CSSProperties;
+
+  const cls = [
+    styles.paperStack,
+    memory && styles.memory,
+    leave && styles.leaving,
+    leave && (leave === "next" ? styles.leaveNext : styles.leavePrev),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div
+      className={cls}
+      style={vars}
+      data-step={stepped || undefined}
+      inert={Boolean(leave)}
+      aria-hidden={leave ? true : undefined}
+      onAnimationEnd={(e) => {
+        if (leave && e.target === e.currentTarget) onLeft?.();
+      }}
+    >
+      <article aria-labelledby={titleId} className={`${styles.sheet} ${pick(styles.unfold, styles.sheetCalm)}`}>
+        <header className={styles.head} data-pull-close>
+          <PostageStamp icon={s.icon} year={postmarkYear(m.createdAt)} />
+          <h2 id={titleId} className={styles.address}>
+            <span className={styles.to}>{memory ? "إلى روح" : "إلى"}</span>{" "}
+            <span className={styles.name}>{displayTo(m)}</span>
+          </h2>
+          {m.school && <p className={styles.school}>{m.school}</p>}
+        </header>
+
+        <div className={styles.body}>{m.body}</div>
+
+        <footer className={styles.closing}>
+          <div className={styles.sign}>
+            <p className={`${hasLongRun(signer) ? "" : "font-hand"} ${styles.from}`}>
+              <span aria-hidden="true" className={styles.dash}>
+                —
+              </span>
+              {signer}
+            </p>
+            <time dateTime={m.createdAt} className={styles.date}>
+              {(hydrated && formatDate(m.createdAt)) || " "}
+            </time>
+          </div>
+          <span className={`stamp ${styles.rubber} ${pick(styles.rubberIn, styles.fadeLate)}`}>
+            {stampFor(m)}
+          </span>
+        </footer>
+
+        <div className={styles.sheetEnd}>
+          <ReportButton message={m} />
+        </div>
+      </article>
+
+      <WaxSeal
+        m={m}
+        color={memory ? "#a99fb3" : s.accent}
+        className={pick(styles.sealTravel, styles.fadeIn)}
+      />
+      {children}
     </div>
   );
 }

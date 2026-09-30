@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icon3D } from "@/components/ui/Icon3D";
+import { SoundToggle } from "@/components/ui/SoundToggle";
 import { COPY } from "@/lib/config";
 import { ChefzLogo } from "./ChefzLogo";
 import { GiftLink } from "./GiftLink";
@@ -43,13 +44,13 @@ export function Header() {
           : "border-transparent bg-transparent"
       }`}
     >
-      <div className="container-page flex h-16 items-center gap-3">
+      <div className="container-page flex h-14 items-center gap-3 sm:h-16">
         <Link
           href="/"
           aria-label="ذا شفز — الصفحة الرئيسية"
           className="-mx-1.5 inline-flex min-h-11 shrink-0 items-center rounded-xl px-1.5"
         >
-          <ChefzLogo fluid priority height={30} className="h-[26px] sm:h-[30px]" />
+          <ChefzLogo fluid priority height={30} className="h-6 sm:h-[30px]" />
         </Link>
 
         <nav aria-label="أقسام الصفحة" className="ms-6 hidden items-center gap-1 md:flex lg:ms-10">
@@ -73,12 +74,22 @@ export function Header() {
             {GIFT_LABEL}
           </GiftLink>
 
-          <a href="#write" className="btn btn-primary min-h-11 px-4 py-2 text-[0.95rem] md:hidden">
+          <a
+            href="#write"
+            className="btn btn-primary min-h-11 rounded-xl px-4 py-2 text-ui shadow-[0_6px_14px_-10px_rgb(235_101_44/0.8)] md:hidden"
+          >
             {COPY.heroCtaWrite}
           </a>
-          <GiftLink from="header" label={GIFT_LABEL} className="icon-btn shadow-soft md:hidden">
+          {/* Below 360px the bar can't hold all four; the gift is on the form and every letter. */}
+          <GiftLink
+            from="header"
+            label={GIFT_LABEL}
+            className="icon-btn shadow-soft max-[359px]:hidden md:hidden"
+          >
             <Icon3D name="gift" size={28} priority />
           </GiftLink>
+          {/* Phones: the sound switch lives up here, where it covers nothing (from md it's fixed at the bottom-end). */}
+          <SoundToggle className="shadow-soft md:hidden" />
         </div>
       </div>
     </header>

@@ -25,17 +25,18 @@ import type { LikeResult, PublicMessage } from "@/lib/types";
  *  - likes (optimistic, remembered per browser)
  *  - "a new letter was just published" notifications
  *  - prefilling the form from the search empty state
+ *
+ * The open letter itself lives in a second context (useOpenLetter), so opening
+ * or closing one doesn't re-render every card on the wall inside the tap.
  */
 export interface LettersContextValue {
   total: number;
 
-  openMessage: PublicMessage | null;
   /** Opens a letter by object or id (fetches unknown ids). Updates the URL to /m/:id. */
   openLetter: (target: PublicMessage | string) => void;
   closeLetter: () => void;
   /** The wall reports its current visible order so the letter view can step prev/next. */
   setWallOrder: (ids: string[]) => void;
-  neighbours: { prev: string | null; next: string | null };
   /** Add messages to the lookup cache (the wall calls this for every page it loads). */
   remember: (messages: PublicMessage[]) => void;
 
@@ -57,11 +58,25 @@ export interface LettersContextValue {
   hiddenIds: ReadonlySet<string>;
 }
 
+export interface OpenLetterValue {
+  openMessage: PublicMessage | null;
+  /** The open letter's neighbours in the wall's current order. */
+  neighbours: { prev: string | null; next: string | null };
+}
+
 const LettersContext = createContext<LettersContextValue | null>(null);
+const OpenLetterContext = createContext<OpenLetterValue | null>(null);
 
 export function useLetters(): LettersContextValue {
   const ctx = useContext(LettersContext);
   if (!ctx) throw new Error("useLetters must be used inside <LettersProvider>");
+  return ctx;
+}
+
+/** Which letter is open. Only for the few components that change with it. */
+export function useOpenLetter(): OpenLetterValue {
+  const ctx = useContext(OpenLetterContext);
+  if (!ctx) throw new Error("useOpenLetter must be used inside <LettersProvider>");
   return ctx;
 }
 
@@ -422,11 +437,9 @@ export function LettersProvider({
   const value = useMemo<LettersContextValue>(
     () => ({
       total,
-      openMessage,
       openLetter,
       closeLetter,
       setWallOrder,
-      neighbours,
       remember,
       addMessage,
       onNewMessage,
@@ -439,11 +452,9 @@ export function LettersProvider({
     }),
     [
       total,
-      openMessage,
       openLetter,
       closeLetter,
       setWallOrder,
-      neighbours,
       remember,
       addMessage,
       onNewMessage,
@@ -456,5 +467,11 @@ export function LettersProvider({
     ],
   );
 
-  return <LettersContext.Provider value={value}>{children}</LettersContext.Provider>;
+  const open = useMemo<OpenLetterValue>(() => ({ openMessage, neighbours }), [openMessage, neighbours]);
+
+  return (
+    <LettersContext.Provider value={value}>
+      <OpenLetterContext.Provider value={open}>{children}</OpenLetterContext.Provider>
+    </LettersContext.Provider>
+  );
 }

@@ -47,17 +47,23 @@ export function SuccessPanel({
     <div
       ref={rootRef}
       aria-live="polite"
-      className="paper relative isolate scroll-mt-24 animate-fade-up px-5 pt-4 pb-7 text-center sm:px-10 sm:pt-6 sm:pb-9"
+      className="paper relative isolate scroll-mt-4 animate-fade-up px-5 pt-4 pb-7 text-center sm:scroll-mt-24 sm:px-10 sm:pt-6 sm:pb-9"
     >
-      {/* 4:3 render in a square box: trim the empty band above and below. */}
-      <div className="mx-auto -my-5 w-fit sm:-my-6">
-        <Icon3D name="envelope" size={220} priority className="max-w-full" />
+      {/* 4:3 render in a square box: trim the empty band above and below.
+          Smaller on phones, so the share options make the first screen. */}
+      <div className="mx-auto -mt-2 -mb-3 w-fit sm:-my-6">
+        <Icon3D
+          name="envelope"
+          size={220}
+          priority
+          className="max-w-full size-[150px]! sm:size-[220px]!"
+        />
       </div>
 
       <h3
         ref={headingRef}
         tabIndex={-1}
-        className="mt-1 text-[1.75rem] leading-snug font-bold text-plum focus:outline-none sm:text-[2rem]"
+        className="mt-1 text-h3 leading-snug font-bold text-plum focus:outline-none sm:text-[2rem]"
       >
         {title}
       </h3>
@@ -67,7 +73,7 @@ export function SuccessPanel({
           {COPY.pendingTag}
         </p>
       )}
-      <p className="mx-auto mt-2 max-w-md leading-8 text-balance text-ink-soft">{lead}</p>
+      <p className="mx-auto mt-2 max-w-md leading-7 text-balance text-ink-soft sm:leading-8">{lead}</p>
 
       <LetterNote message={message} />
 
@@ -114,7 +120,9 @@ function LetterNote({ message }: { message: PublicMessage }) {
       <p className="text-[0.9rem] font-bold opacity-80">{message.inMemory ? "إلى روح" : "إلى"}</p>
       <p className="text-[1.3rem] leading-snug font-bold break-words">{displayTo(message)}</p>
       {message.school && <p className="text-[0.95rem] break-words opacity-80">{message.school}</p>}
-      <p className="mt-3 leading-8 break-words whitespace-pre-line">{excerpt(message.body, 160)}</p>
+      <p className="mt-3 leading-8 break-words whitespace-pre-line max-sm:line-clamp-4">
+        {excerpt(message.body, 160)}
+      </p>
       <div className="mt-3 flex items-end justify-between gap-3">
         <p className="font-hand text-[1.35rem] leading-tight font-bold" style={{ color: ink.accentInk }}>
           — {fromName(message)}
@@ -135,19 +143,21 @@ function LetterNote({ message }: { message: PublicMessage }) {
 
 function GiftNote({ feminine }: { feminine: boolean }) {
   return (
-    <div className="mx-auto mt-7 flex max-w-md flex-col items-center gap-3 border-t border-dashed border-line-strong pt-6 sm:flex-row sm:gap-4 sm:text-start">
-      <Icon3D name="gift" size={72} className="-my-2 shrink-0" />
+    // Phones: the icon beside the two lines, the button full-width under them.
+    <div className="mx-auto mt-7 grid max-w-md grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-dashed border-line-strong pt-6 text-start sm:flex sm:flex-row sm:gap-4">
+      <Icon3D name="gift" size={72} className="size-12! shrink-0 sm:-my-2 sm:size-[72px]!" />
       <div className="min-w-0 flex-1">
         <p className="text-lg font-bold text-plum">
           {feminine ? "تبي ترسل لها هدية؟" : "تبي ترسل له هدية؟"}
         </p>
-        <p className="mt-0.5 text-[0.95rem] leading-7 text-ink-soft">
+        {/* The no-break space keeps the wink with its word (no lone emoji line). */}
+        <p className="mt-0.5 text-[0.95rem] leading-7 text-ink-soft max-sm:text-balance">
           {feminine
-            ? "أرسل لها هدية من ذا شفز، ما يحتاج لوكيشن 😉"
-            : "أرسل له هدية من ذا شفز، ما يحتاج لوكيشن 😉"}
+            ? "أرسل لها هدية من ذا شفز، ما يحتاج لوكيشن\u00a0😉"
+            : "أرسل له هدية من ذا شفز، ما يحتاج لوكيشن\u00a0😉"}
         </p>
       </div>
-      <GiftLink from="success" className="btn btn-plum w-full shrink-0 sm:w-auto">
+      <GiftLink from="success" className="btn btn-plum col-span-2 w-full shrink-0 sm:w-auto">
         أرسل هدية
       </GiftLink>
     </div>

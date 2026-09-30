@@ -5,6 +5,7 @@ import {
   SHEET,
   classifySwipe,
   contrast,
+  gestureKind,
   hasLongRun,
   letterPalette,
   mix,
@@ -77,8 +78,18 @@ describe("gesture clock", () => {
   it("remembers the last press for a short window", () => {
     const t0 = 1_000_000;
     noteGesture(null, t0);
-    expect(recentGesture(t0 + 100)).toEqual({ target: null });
+    expect(recentGesture(t0 + 100)).toEqual({ target: null, kind: "mouse" });
     expect(recentGesture(t0 + GESTURE_WINDOW_MS + 1)).toBeNull();
+  });
+
+  it("tells keys, fingers and mice apart", () => {
+    const t0 = 2_000_000;
+    noteGesture(null, t0, "touch");
+    expect(recentGesture(t0 + 10)?.kind).toBe("touch");
+    expect(gestureKind({ type: "keydown" } as Event)).toBe("key");
+    expect(gestureKind({ type: "pointerdown", pointerType: "touch" } as PointerEvent)).toBe("touch");
+    expect(gestureKind({ type: "pointerdown", pointerType: "pen" } as PointerEvent)).toBe("touch");
+    expect(gestureKind({ type: "pointerup", pointerType: "mouse" } as PointerEvent)).toBe("mouse");
   });
 });
 

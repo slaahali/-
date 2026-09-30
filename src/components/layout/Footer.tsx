@@ -7,8 +7,8 @@ import { GiftLink } from "./GiftLink";
 
 export function Footer() {
   return (
-    <footer className="relative mt-8 border-t border-plum-100 bg-plum-50">
-      <div className="container-page grid gap-8 py-12 md:grid-cols-[minmax(0,1fr)_auto] md:items-end md:gap-12 md:py-14">
+    <footer className="relative border-t border-plum-100 bg-plum-50 sm:mt-8">
+      <div className="container-page grid gap-6 py-9 sm:gap-8 sm:py-12 md:grid-cols-[minmax(0,1fr)_auto] md:items-end md:gap-12 md:py-14">
         <div className="max-w-xl">
           <a
             href={BRAND_URL}
@@ -37,9 +37,10 @@ export function Footer() {
         </div>
       </div>
 
-      {/* Bottom padding keeps the fixed sound button (bottom-end) off the last line. */}
+      {/* From md, the bottom padding keeps the fixed sound button (bottom-end) off
+          the last line; phones have it in the header. */}
       <div className="border-t border-plum-100">
-        <div className="container-page flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-5 pb-[max(1.25rem,calc(env(safe-area-inset-bottom)+4rem))] text-sm text-ink-mute xl:pb-5">
+        <div className="container-page flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-sm text-ink-mute md:pb-[max(1.25rem,calc(env(safe-area-inset-bottom)+4rem))] xl:pb-5">
           <span>© {COPY.brand}</span>
           <span>{COPY.footerMadeWith}</span>
         </div>

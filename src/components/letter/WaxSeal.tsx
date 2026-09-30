@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { useHydrated } from "@/components/wall/hooks";
 import { sealFor } from "@/lib/assets";
+import { isArtReady, markArtReady } from "./letter-art";
 import { mix } from "./letter-utils";
 import styles from "./letter.module.css";
 
@@ -56,7 +58,8 @@ function SealArt({ color, memory }: { color: string; memory: boolean }) {
 /**
  * The wax seal, already broken in two: the Higgsfield render (self-hosted copy,
  * then the CDN) or the drawn fallback. Both halves show the same art, each
- * clipped along a jagged crack.
+ * clipped along a jagged crack. The drawn seal also stands in while the render
+ * is still loading, so there is always a seal to crack.
  */
 export function WaxSeal({
   m,
@@ -69,34 +72,49 @@ export function WaxSeal({
 }) {
   const src = sealFor(m);
   const [stage, setStage] = useState<0 | 1 | 2>(0);
+  const [loaded, setLoaded] = useState(() => isArtReady(src.local));
+  // A server-rendered seal shows the render as it arrives, like any page image.
+  const hydrated = useHydrated();
+  const pending = hydrated && !loaded;
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // An image that failed before hydration never fires React's onError.
+  // An image that settled before hydration never fires React's onLoad / onError.
   useEffect(() => {
     const img = imgRef.current;
-    if (img && img.complete && img.naturalWidth === 0) setStage((s) => (s === 0 ? 1 : 2));
+    if (!img?.complete) return;
+    if (img.naturalWidth === 0) setStage((s) => (s === 0 ? 1 : 2));
+    else setLoaded(true);
   }, [stage]);
 
   const fail = () => setStage((s) => (s === 0 ? 1 : 2));
+  const load = () => {
+    if (stage === 0) markArtReady(src.local);
+    setLoaded(true);
+  };
   const memory = Boolean(m.inMemory);
 
-  const art = (half: 0 | 1) =>
-    stage === 2 ? (
-      <SealArt color={color} memory={memory} />
-    ) : (
-      // eslint-disable-next-line @next/next/no-img-element -- transparent render with a runtime CDN + SVG fallback
-      <img
-        ref={half === 0 ? imgRef : undefined}
-        src={stage === 0 ? src.local : src.remote}
-        alt=""
-        width={96}
-        height={96}
-        decoding="async"
-        draggable={false}
-        onError={half === 0 ? fail : undefined}
-        className={styles.sealImg}
-      />
-    );
+  const art = (half: 0 | 1) => (
+    <>
+      {(stage === 2 || pending) && <SealArt color={color} memory={memory} />}
+      {stage !== 2 && (
+        // eslint-disable-next-line @next/next/no-img-element -- transparent render with a runtime CDN + SVG fallback
+        <img
+          ref={half === 0 ? imgRef : undefined}
+          src={stage === 0 ? src.local : src.remote}
+          alt=""
+          width={96}
+          height={96}
+          // Part of the frame the letter opens on: never paint it a frame late.
+          decoding="sync"
+          draggable={false}
+          hidden={pending}
+          onLoad={half === 0 ? load : undefined}
+          onError={half === 0 ? fail : undefined}
+          className={styles.sealImg}
+        />
+      )}
+    </>
+  );
 
   return (
     <span aria-hidden="true" className={`${styles.seal} ${className}`}>

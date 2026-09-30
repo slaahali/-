@@ -78,6 +78,9 @@ export function sealFor(m: { variant: number; inMemory?: boolean }): { local: st
   return { local: `/seals/${key}.webp`, remote: `${manifest.cdn}/${file}` };
 }
 
+/** The self-hosted seal files, for preloading before the first letter opens. */
+export const SEAL_URLS = (Object.keys(manifest.seals) as SealKey[]).map((key) => `/seals/${key}.webp`);
+
 /** @deprecated use cardStyle(m) / colorAt(v). Kept for older call sites. */
 export const VARIANTS = CARD_COLORS;
 /** @deprecated use cardStyle(m) / colorAt(v). */

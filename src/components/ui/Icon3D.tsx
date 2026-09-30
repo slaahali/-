@@ -55,7 +55,8 @@ export function Icon3D({
       width={size}
       height={size}
       loading={priority ? "eager" : "lazy"}
-      decoding="async"
+      // Priority icons are part of the frame they first appear in (the letter's stamp).
+      decoding={priority ? "sync" : "async"}
       draggable={false}
       onError={() => setStage((s) => (s === 0 ? 1 : 2))}
       className={`select-none object-contain ${className}`}
