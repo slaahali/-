@@ -98,7 +98,7 @@ export const COPY = {
   letterIn: "في",
   letterFrom: "من:",
   labelSchool: "المدرسة أو الجامعة",
-  placeholderSchool: "المدرسة أو الجامعة (اختياري)",
+  placeholderSchool: "مثال: ثانوية الملك فهد",
   optional: "اختياري",
   labelBody: "رسالتك",
   bodyPlaceholders: [
@@ -120,7 +120,7 @@ export const COPY = {
     "بنختار مجموعة من أجمل الرسائل ونفاجئ المعلمين بهدية من ذا شفز. تبي نتواصل معك لو انختارت رسالتك؟",
   surpriseOptIn: "إيه، تواصلوا معي لو انختارت رسالتي",
   labelContact: "رقم جوالك أو إيميلك",
-  placeholderContact: "05xxxxxxxx أو name@email.com",
+  placeholderContact: "05xxxxxxxx أو إيميلك",
   contactPrivacy:
     "ما ينشر أبداً — يشوفه فريق ذا شفز بس، ونستخدمه للتواصل معك بخصوص المفاجأة فقط.",
 

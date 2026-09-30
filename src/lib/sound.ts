@@ -198,9 +198,18 @@ function synth(ac: AudioContext, name: SoundName) {
   o.stop(t + 0.2);
 }
 
-/** Play a moment sound. Call from a user gesture (click/tap/key). */
+const lastPlayed = new Map<SoundName, number>();
+const DEDUPE_MS = 350;
+
+/**
+ * Play a moment sound. Call from a user gesture (click/tap/key). The same sound
+ * requested twice within ~350ms plays once (several openers may fire it).
+ */
 export async function play(name: SoundName): Promise<void> {
   if (!soundEnabled()) return;
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  if (now - (lastPlayed.get(name) ?? -Infinity) < DEDUPE_MS) return;
+  lastPlayed.set(name, now);
   const ac = audio();
   if (!ac) return;
   const buf = FILES[name] ? await loadFile(name) : null;

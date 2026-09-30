@@ -6,6 +6,7 @@ import { GiftLink } from "@/components/layout/GiftLink";
 import { ShareMenu } from "@/components/share/ShareMenu";
 import { Icon3D } from "@/components/ui/Icon3D";
 import { cardStyle } from "@/lib/assets";
+import { letterPalette } from "@/components/letter/letter-utils";
 import { COPY } from "@/lib/config";
 import { displayTo, excerpt, fromName, stampFor } from "@/lib/format";
 import type { PublicMessage, TeacherTitle } from "@/lib/types";
@@ -95,6 +96,8 @@ export function SuccessPanel({
 /** What they just wrote, as a folded note in the envelope's colour. */
 function LetterNote({ message }: { message: PublicMessage }) {
   const look = cardStyle(message);
+  // Same contrast-safe inks as the letter view (raw accents are too light on orange/gold/peach).
+  const ink = letterPalette(look);
   return (
     <article
       aria-label="معاينة رسالتك"
@@ -113,10 +116,10 @@ function LetterNote({ message }: { message: PublicMessage }) {
       {message.school && <p className="text-[0.95rem] break-words opacity-80">{message.school}</p>}
       <p className="mt-3 leading-8 break-words whitespace-pre-line">{excerpt(message.body, 160)}</p>
       <div className="mt-3 flex items-end justify-between gap-3">
-        <p className="font-hand text-[1.35rem] leading-tight font-bold" style={{ color: look.accent }}>
+        <p className="font-hand text-[1.35rem] leading-tight font-bold" style={{ color: ink.accentInk }}>
           — {fromName(message)}
         </p>
-        <span aria-hidden className="stamp -mb-1 text-[0.95rem]" style={{ color: look.accent }}>
+        <span aria-hidden className="stamp -mb-1 text-[0.95rem]" style={{ color: ink.stampInk }}>
           {stampFor(message)}
         </span>
       </div>

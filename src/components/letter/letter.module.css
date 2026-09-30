@@ -360,6 +360,15 @@
   color: var(--accent-ink);
   overflow-wrap: anywhere;
 }
+/* In Ruqaa the dash sits on the baseline and reads as a stretched letter: set it apart. */
+.dash {
+  margin-inline-end: 0.45em;
+  font-family: var(--font-sans);
+  font-size: 0.9em;
+  font-weight: 400;
+  vertical-align: 0.2em;
+  opacity: 0.75;
+}
 .date {
   display: block;
   margin-top: 0.15rem;
@@ -746,7 +755,8 @@
     width: 94%;
     height: 14rem;
     rotate: -2deg;
-    translate: -1.25rem 0;
+    /* nudged off-centre, but its corners stay tucked behind the sheet */
+    translate: -0.6rem 0;
   }
   .paperStack {
     margin-top: -7.25rem;

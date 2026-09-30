@@ -62,11 +62,11 @@ export function LetterModal() {
   useEffect(() => {
     const note = (e: Event) => noteGesture(e.target);
     const opts = { capture: true, passive: true } as const;
-    window.addEventListener("pointerdown", note, opts);
-    window.addEventListener("keydown", note, opts);
+    // pointerup too: a slow swipe steps on touchend, well after its pointerdown.
+    const types = ["pointerdown", "pointerup", "keydown"] as const;
+    for (const t of types) window.addEventListener(t, note, opts);
     return () => {
-      window.removeEventListener("pointerdown", note, opts);
-      window.removeEventListener("keydown", note, opts);
+      for (const t of types) window.removeEventListener(t, note, opts);
     };
   }, []);
 
@@ -124,6 +124,8 @@ function restoreFocus(opener: HTMLElement | null, slot: Slot | null, openerRemov
       return;
     }
   }
+  // Nothing was focused when the letter opened (deep link, 3D scene): leave focus be.
+  if (!opener) return;
   const wall = document.getElementById("letters");
   const heading = wall?.querySelector<HTMLElement>("h2") ?? wall;
   if (!heading) return;
@@ -186,7 +188,14 @@ function LetterView({ m }: { m: PublicMessage }) {
     const overlay = overlayRef.current;
     if (!overlay) return;
     const active = document.activeElement;
-    const opener = active instanceof HTMLElement && active !== document.body ? active : null;
+    // Safari doesn't focus a clicked button: fall back to what was just pressed.
+    const pressed = recentGesture()?.target?.closest<HTMLElement>(FOCUSABLE) ?? null;
+    const opener =
+      active instanceof HTMLElement && active !== document.body
+        ? active
+        : pressed && !overlay.contains(pressed)
+          ? pressed
+          : null;
     const slot = opener ? slotOf(opener) : null;
     const removed = removedRef.current;
     const html = document.documentElement;
@@ -414,7 +423,10 @@ function LetterView({ m }: { m: PublicMessage }) {
               <footer className={styles.closing}>
                 <div className={styles.sign}>
                   <p className={`${hasLongRun(signer) ? "" : "font-hand"} ${styles.from}`}>
-                    — {signer}
+                    <span aria-hidden="true" className={styles.dash}>
+                      —
+                    </span>
+                    {signer}
                   </p>
                   <time dateTime={m.createdAt} className={styles.date}>
                     {(hydrated && formatDate(m.createdAt)) || " "}

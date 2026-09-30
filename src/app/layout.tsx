@@ -66,6 +66,8 @@ export const viewport: Viewport = {
   themeColor: "#fbf7f2",
   width: "device-width",
   initialScale: 1,
+  // Let fixed bars use env(safe-area-inset-*) on notched phones.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -45,7 +45,7 @@ describe("letter view SSR", () => {
     expect(html).toMatch(/<h2[^>]*id="[^"]+"[^>]*><span[^>]*>إلى<\/span> <span[^>]*>أستاذة نورة القحطاني<\/span><\/h2>/);
     expect(html).toContain("ثانوية الملك فهد");
     expect(html).toContain("شكراً لأنك آمنت فيني");
-    expect(html).toContain("— سارة");
+    expect(html).toMatch(/—<\/span>سارة<\/p>/);
     expect(html).toContain("شكراً معلمي");
     // postage stamp + postmark
     expect(html).toContain("يوم المعلم");
@@ -63,7 +63,7 @@ describe("letter view SSR", () => {
     expect(html).toContain("الدكتور سعد");
     expect(html).toContain("في ذكراك 🤍");
     expect(html).toContain("دعوة بالرحمة");
-    expect(html).toContain("— أحد طلابك");
+    expect(html).toMatch(/—<\/span>أحد طلابك<\/p>/);
     expect(html).not.toContain("هدية");
   });
 
@@ -83,9 +83,9 @@ describe("letter view SSR", () => {
 
   it("sets long laughter runs in the book face, not the handwriting", () => {
     const html = render({ ...letter, fromName: "ههههههههه" });
-    const sign = html.match(/<p class="([^"]*)">— ههههههههه<\/p>/);
+    const sign = html.match(/<p class="([^"]*)"><span[^>]*>—<\/span>ههههههههه<\/p>/);
     expect(sign).not.toBeNull();
     expect(sign?.[1]).not.toContain("font-hand");
-    expect(render(letter)).toMatch(/<p class="font-hand [^"]*">— سارة<\/p>/);
+    expect(render(letter)).toMatch(/<p class="font-hand [^"]*"><span[^>]*>—<\/span>سارة<\/p>/);
   });
 });
