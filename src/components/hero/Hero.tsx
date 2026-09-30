@@ -40,10 +40,14 @@ const TITLE_START = TITLE_WORDS.join(" ");
 const fade = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
 export function Hero({ letters }: { letters: PublicMessage[] }) {
-  const { total, openLetter } = useLetters();
+  const { total, openLetter, hiddenIds } = useLetters();
   const sceneLetters = useMemo(
-    () => letters.slice(0, MAX_SCENE_LETTERS).map(toSceneLetter),
-    [letters],
+    () =>
+      letters
+        .filter((m) => !hiddenIds.has(m.id))
+        .slice(0, MAX_SCENE_LETTERS)
+        .map(toSceneLetter),
+    [letters, hiddenIds],
   );
 
   return (
@@ -153,9 +157,13 @@ export function Hero({ letters }: { letters: PublicMessage[] }) {
             style={fade(360)}
           >
             <span aria-hidden>💌</span>
-            <span>
-              <b className="font-bold tabular-nums">{formatCount(total)}</b> رسالة شكر وصلت لمعلمينهم
-            </span>
+            {total > 0 ? (
+              <span>
+                <b className="font-bold tabular-nums">{formatCount(total)}</b> رسالة شكر وصلت لمعلمينهم
+              </span>
+            ) : (
+              <span>{COPY.emptyWall}</span>
+            )}
           </p>
 
           <p

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { GIFT_URL } from "@/lib/config";
 import { track } from "@/lib/track";
 
-export type GiftFrom = "header" | "footer" | "form" | "success" | "hero";
+export type GiftFrom = "header" | "footer" | "form" | "success" | "hero" | "letter";
 
 /** Outbound link to The Chefz gifts page (new tab) that reports where it was clicked. */
 export function GiftLink({

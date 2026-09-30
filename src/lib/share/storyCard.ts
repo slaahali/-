@@ -374,10 +374,9 @@ function layoutCard(ctx: Ctx, m: PublicMessage, f: Fonts): CardLayout {
     // Still too long at the smallest size: drop blank lines, then cut with "…".
     ctx.font = ruqaa(400)(bodySize);
     const max = Math.max(1, Math.floor((sigLimit - sigGap - bodyBase) / lh) + 1);
-    const kept = wrap(ctx, m.body, TW, false).slice(0, max);
-    while (kept.length > 1 && kept[kept.length - 1] === "") kept.pop();
-    kept[kept.length - 1] = ellipsize(ctx, kept[kept.length - 1], TW);
-    bodyLines = kept;
+    const compact = wrap(ctx, m.body, TW, false);
+    bodyLines = compact.slice(0, max);
+    if (compact.length > max) bodyLines[max - 1] = ellipsize(ctx, bodyLines[max - 1], TW);
   }
   const sigBase = bodyBase + (bodyLines.length - 1) * lh + sigGap;
   const sigSize = fitSize(ctx, signature, ruqaa(700), 540, Math.min(54, bodySize + 6), 34);
@@ -386,8 +385,15 @@ function layoutCard(ctx: Ctx, m: PublicMessage, f: Fonts): CardLayout {
   return { h, toLines, toSize, school, bodyLines, bodySize, lh, toBase, schoolBase, divider, bodyBase, sigBase, signature, sigSize };
 }
 
-function drawCard(ctx: Ctx, L: CardLayout, m: PublicMessage, f: Fonts, style: CardStyle, icon: HTMLImageElement | null, top: number) {
-
+function drawCard(
+  ctx: Ctx,
+  L: CardLayout,
+  m: PublicMessage,
+  f: Fonts,
+  style: CardStyle,
+  icon: HTMLImageElement | null,
+  top: number,
+) {
   ctx.save();
   ctx.translate(W / 2, top + L.h / 2);
   ctx.rotate((-2 * Math.PI) / 180);

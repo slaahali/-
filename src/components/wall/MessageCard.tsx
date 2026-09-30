@@ -119,7 +119,11 @@ export function MessageCard({
       <div className={styles.actions}>
         <LikeButton message={m} size="sm" />
         <div className="ms-auto flex items-center">
-          <ShareMenu message={m} mode="compact" />
+          <ShareMenu
+            message={m}
+            mode="compact"
+            className="border-transparent bg-white/55 hover:bg-white"
+          />
           <ReportButton message={m} compact />
         </div>
       </div>

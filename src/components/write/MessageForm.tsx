@@ -199,6 +199,7 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
   const fromNameRef = useRef<HTMLInputElement>(null);
   const contactRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | undefined>(undefined);
+  const inFlight = useRef(false);
 
   const fieldRef = (f: InputField) =>
     ({ toName: toNameRef, school: schoolRef, body: bodyRef, fromName: fromNameRef, contact: contactRef })[f];
@@ -291,7 +292,8 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (phase !== "idle") return;
+    // The ref also stops a double tap that lands before React re-renders.
+    if (phase !== "idle" || inFlight.current) return;
 
     const fields: FormFields = {
       title,
@@ -316,7 +318,10 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
     setErrors({});
     setPhase("submitting");
 
-    const res = await createMessage(buildRequestBody(fields, website));
+    inFlight.current = true;
+    const res = await createMessage(buildRequestBody(fields, website)).finally(() => {
+      inFlight.current = false;
+    });
 
     if (res.ok) {
       window.clearTimeout(saveTimer.current);
@@ -336,14 +341,15 @@ function LetterForm({ hydrated }: { hydrated: boolean }) {
 
     setPhase("idle");
     const err = res.error;
-    if (err.error === "validation" && Object.keys(err.fields).length > 0) {
+    if (err.error === "validation" && err.fields && Object.keys(err.fields).length > 0) {
       setErrors(err.fields);
       focusField(firstInvalid(Object.keys(err.fields)));
       track("letter_submit_blocked", { reason: "validation" });
     } else if (err.error === "moderation") {
-      setFlagged(err.fields);
+      const fields = Array.isArray(err.fields) ? err.fields : [];
+      setFlagged(fields);
       setBanner({ tone: "warn", message: err.message || COPY.moderationError });
-      focusField(firstInvalid(err.fields));
+      focusField(firstInvalid(fields));
       track("letter_submit_blocked", { reason: "moderation" });
     } else if (err.error === "rate_limited" || res.status === 429) {
       const message = "message" in err && err.message ? err.message : COPY.rateLimited;

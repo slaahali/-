@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchMessage, likeMessage } from "@/lib/api-client";
-import { emitNewLetter } from "@/lib/events";
+import { emitNewLetter, LETTER_HIDDEN_EVENT } from "@/lib/events";
 import { toSceneLetter } from "@/lib/format";
 import { track } from "@/lib/track";
 import type { PublicMessage } from "@/lib/types";
@@ -51,6 +51,9 @@ export interface LettersContextValue {
   /** Set by the search empty state ("اكتب له رسالة"); the form watches `nonce`. */
   prefill: { toName: string; nonce: number } | null;
   requestPrefill: (toName: string) => void;
+
+  /** Letters that stopped being public during this visit (e.g. removal requests). */
+  hiddenIds: ReadonlySet<string>;
 }
 
 const LettersContext = createContext<LettersContextValue | null>(null);
@@ -99,8 +102,10 @@ export function LettersProvider({
   const [liked, setLiked] = useState<Set<string>>(() => new Set());
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [prefill, setPrefill] = useState<{ toName: string; nonce: number } | null>(null);
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const cache = useRef(new Map<string, PublicMessage>());
+  const hiddenRef = useRef(new Set<string>());
   const listeners = useRef(new Set<(m: PublicMessage) => void>());
   /** True when *we* pushed the /m/:id history entry (so close can go back). */
   const pushedRef = useRef(false);
@@ -188,6 +193,21 @@ export function LettersProvider({
     return () => window.removeEventListener("popstate", onPop);
   }, [openById]);
 
+  // A letter taken off the wall from this page (removal request / reports).
+  useEffect(() => {
+    const onHidden = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id;
+      if (!id || hiddenRef.current.has(id)) return;
+      hiddenRef.current.add(id);
+      cache.current.delete(id);
+      setTotal((t) => Math.max(0, t - 1));
+      setHiddenIds(new Set(hiddenRef.current));
+      setWallOrderState((ids) => ids.filter((x) => x !== id));
+    };
+    window.addEventListener(LETTER_HIDDEN_EVENT, onHidden);
+    return () => window.removeEventListener(LETTER_HIDDEN_EVENT, onHidden);
+  }, []);
+
   const setWallOrder = useCallback((ids: string[]) => setWallOrderState(ids), []);
 
   const neighbours = useMemo(() => {
@@ -270,6 +290,7 @@ export function LettersProvider({
       toggleLike,
       prefill,
       requestPrefill,
+      hiddenIds,
     }),
     [
       total,
@@ -286,6 +307,7 @@ export function LettersProvider({
       toggleLike,
       prefill,
       requestPrefill,
+      hiddenIds,
     ],
   );
 

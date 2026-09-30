@@ -13,11 +13,12 @@ import { CloseGlyph, FlagGlyph, Spinner } from "@/components/wall/glyphs";
 import { prefersReducedMotion } from "@/components/wall/hooks";
 import { reportMessage } from "@/lib/api-client";
 import { COPY } from "@/lib/config";
+import { emitLetterHidden } from "@/lib/events";
 import { track } from "@/lib/track";
 import type { PublicMessage, ReportReason } from "@/lib/types";
 
 /** Dispatched on window (detail: { id }) once a report took a letter off the wall. */
-export const LETTER_HIDDEN_EVENT = "letters:hidden";
+export { LETTER_HIDDEN_EVENT } from "@/lib/events";
 
 const REASONS: ReportReason[] = ["inappropriate", "removal_request", "other"];
 const NOTE_MAX = 200;
@@ -133,7 +134,7 @@ function ReportDialog({ message, onClosed }: { message: PublicMessage; onClosed:
   }, []);
 
   const notifyHidden = () => {
-    window.dispatchEvent(new CustomEvent(LETTER_HIDDEN_EVENT, { detail: { id: message.id } }));
+    emitLetterHidden(message.id);
     if (openMessage?.id === message.id) closeLetter();
   };
 

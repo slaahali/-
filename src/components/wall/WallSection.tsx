@@ -4,7 +4,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 import { useLetters } from "@/components/LettersProvider";
 import { ShareSearch } from "@/components/share/ShareSearch";
 import { Icon3D } from "@/components/ui/Icon3D";
-import { LETTER_HIDDEN_EVENT } from "@/components/ui/ReportButton";
+import { LETTER_HIDDEN_EVENT } from "@/lib/events";
 import { COPY } from "@/lib/config";
 import { formatCount } from "@/lib/format";
 import type { ListResult, PublicMessage, SortMode } from "@/lib/types";

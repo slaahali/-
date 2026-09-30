@@ -37,7 +37,7 @@ export const FORM_ERRORS = {
   bodyLong: "الرسالة أطول من ٦٠٠ حرف",
   fromNameLong: "اسمك طويل شوي",
   contactEmpty: "اكتب رقم جوالك أو إيميلك عشان نتواصل معك",
-  contactInvalid: "تأكد من رقم الجوال أو الإيميل 🙏",
+  contactInvalid: "اكتب رقم جوال سعودي أو إيميل صحيح",
   contactLong: "طويل شوي — اكتب رقم جوال أو إيميل واحد",
 } as const;
 
@@ -60,14 +60,18 @@ const toAsciiDigits = (s: string) =>
     .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
     .replace(/[\u06f0-\u06f9]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-const SA_MOBILE_RE = /^(?:\+?966|00966|0)?5\d{8}$/;
+// Same rules as the API's normalizeContact (src/lib/validation.ts), so the form
+// never accepts what the server rejects (or the other way round).
+const SA_MOBILE_RE = /^(?:(?:\+|00)?9660?|0)?5\d{8}$/;
+const EMAIL_RE =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,24}$/;
 
 /** A Saudi mobile (05…, 5…, +9665…, 009665…) or an email address. */
 export function isValidContact(value: string): boolean {
   const s = toAsciiDigits(value).trim();
-  if (EMAIL_RE.test(s)) return true;
-  return SA_MOBILE_RE.test(s.replace(/[\s\-().]/g, ""));
+  if (SA_MOBILE_RE.test(s.replace(/[\s()\-‐-―−]/g, ""))) return true;
+  const email = s.toLowerCase();
+  return charCount(email) <= LIMITS.contact.max && EMAIL_RE.test(email) && !email.includes("..");
 }
 
 /** The surprise block doesn't apply to «في ذكرى» letters (it's hidden in the form). */

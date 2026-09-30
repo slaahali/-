@@ -32,6 +32,12 @@ const dateFmt = new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", {
   year: "numeric",
 });
 
+/** Intl throws a RangeError on an invalid Date; show nothing instead of crashing the view. */
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : dateFmt.format(d);
+}
+
 /** Light illustration gradients (cream, gold) get dark text instead of white. */
 function isLightGradient([a, b]: [string, string]): boolean {
   const lum = (hex: string) => {
@@ -134,10 +140,16 @@ function LetterView({ m }: { m: PublicMessage }) {
     if (id) openLetter(id);
   };
 
+  /** Inside a nested dialog (report sheet, portalled share popover) rather than the letter itself. */
+  const inNestedDialog = (t: Element | null) => {
+    const d = t?.closest('dialog, [role="dialog"]');
+    return Boolean(d && d !== overlayRef.current);
+  };
+
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
     const target = e.target instanceof Element ? e.target : null;
-    // The report sheet is a native modal <dialog>: it handles its own keys.
-    if (target?.closest("dialog[open]")) return;
+    // Nested dialogs handle their own keys.
+    if (inNestedDialog(target)) return;
 
     if (e.key === "Escape") {
       if (e.defaultPrevented) return;
@@ -187,7 +199,14 @@ function LetterView({ m }: { m: PublicMessage }) {
 
   const onTouchStart = (e: ReactTouchEvent) => {
     const target = e.target instanceof Element ? e.target : null;
-    if (e.touches.length !== 1 || target?.closest("dialog, input, textarea, [data-no-swipe]")) {
+    // Touches from portalled UI still bubble here through React; only swipe the letter itself.
+    if (
+      e.touches.length !== 1 ||
+      !target ||
+      !overlayRef.current?.contains(target) ||
+      inNestedDialog(target) ||
+      target.closest("input, textarea, [data-no-swipe]")
+    ) {
       touchRef.current = null;
       return;
     }
@@ -299,7 +318,7 @@ function LetterView({ m }: { m: PublicMessage }) {
                 <div className="min-w-0">
                   <p className={`font-hand ${styles.from}`}>— {fromName(m)}</p>
                   <time dateTime={m.createdAt} className={styles.date}>
-                    {hydrated ? dateFmt.format(new Date(m.createdAt)) : "\u00a0"}
+                    {(hydrated && formatDate(m.createdAt)) || "\u00a0"}
                   </time>
                 </div>
                 <span className={`stamp ${styles.stamp} ${pick(styles.stampIn, styles.stampCalm)}`}>

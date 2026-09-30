@@ -207,6 +207,8 @@ export class LettersEngine {
   private pointerX = 0;
   private pointerY = 0;
   private pointerOver = false;
+  private clientX = 0;
+  private clientY = 0;
   private camX = 0;
   private camY = 0;
   private scroll = 0;
@@ -244,6 +246,17 @@ export class LettersEngine {
 
     const canvas = this.renderer.domElement;
     this.canvas = canvas;
+    try {
+      this.rawSlots = generateSlots(this.profile.total, mulberry32(LAYOUT_SEED), this.profile.spread);
+      this.slots = new Array<LetterNode | null>(this.rawSlots.length).fill(null);
+      this.camera = new PerspectiveCamera(FOV_LANDSCAPE, 1, 0.1, 60);
+      this.geometry = createLetterGeometry();
+      this.dust = createDust(this.profile.dust, 10, 6, LAYOUT_SEED + 7);
+    } catch (err) {
+      this.renderer.dispose();
+      throw err;
+    }
+
     canvas.setAttribute("aria-hidden", "true");
     Object.assign(canvas.style, {
       position: "absolute",
@@ -258,7 +271,6 @@ export class LettersEngine {
     this.preferLabelLeft = rootStyle.direction === "rtl";
     this.root.insertBefore(canvas, this.root.firstChild);
 
-    this.camera = new PerspectiveCamera(FOV_LANDSCAPE, 1, 0.1, 60);
     this.camera.position.set(0, 0, CAMERA_Z);
 
     this.scene.fog = new Fog(FOG_COLOR, FOG_NEAR, FOG_FAR);
@@ -267,15 +279,9 @@ export class LettersEngine {
     sun.position.set(SUN.position[0], SUN.position[1], SUN.position[2]);
     this.scene.add(sun);
 
-    this.geometry = createLetterGeometry();
-    this.rawSlots = generateSlots(this.profile.total, mulberry32(LAYOUT_SEED), this.profile.spread);
-    this.slots = new Array<LetterNode | null>(this.rawSlots.length).fill(null);
-
-    this.dust = createDust(this.profile.dust, 10, 6, LAYOUT_SEED + 7);
     this.scene.add(this.dust.points);
 
     this.measure(true);
-    this.preference = slotPreference(this.rawSlots, this.resolved);
     this.bindEvents();
     void this.boot();
   }
@@ -572,6 +578,7 @@ export class LettersEngine {
       node.sticky = false;
       const repaint = contentKey(next) !== node.key;
       node.letter = next;
+      if (this.labelNode === node) this.labelPill.textContent = next.label;
       node.key = contentKey(next);
       if (repaint) this.paintQueue.push(node);
     }
@@ -620,6 +627,8 @@ export class LettersEngine {
 
     const view = this.view();
     this.resolved = this.rawSlots.map((r) => resolveSlot(r, view));
+    // Fixed once letters are placed; until then follow the real size (the first measure may be 1×1).
+    if (!this.ready) this.preference = slotPreference(this.rawSlots, this.resolved);
     for (const node of this.slots) {
       if (!node) continue;
       const r = this.resolved[node.slot];
@@ -654,7 +663,17 @@ export class LettersEngine {
     };
 
     on(window, "pointermove", (e) => this.onPointerMove(e), { passive: true });
-    on(window, "scroll", () => this.updateScroll(), { passive: true });
+    on(
+      window,
+      "scroll",
+      () => {
+        if (!this.intersecting) return; // the IntersectionObserver refreshes it on re-entry
+        this.updateScroll();
+        // The canvas moved under a still mouse: re-aim the hover ray (or drop it once off the canvas).
+        if (this.pointerOver) this.pointerOver = this.setPointerNdc(this.clientX, this.clientY);
+      },
+      { passive: true },
+    );
 
     onCanvas("pointerdown", (e) => {
       this.down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, type: e.pointerType, moved: false };
@@ -760,16 +779,19 @@ export class LettersEngine {
     const vh = window.innerHeight || 1;
     this.pointerX = clamp((e.clientX / vw) * 2 - 1, -1, 1);
     this.pointerY = clamp(-((e.clientY / vh) * 2 - 1), -1, 1);
+    this.clientX = e.clientX;
+    this.clientY = e.clientY;
     this.pointerOver = e.target === this.canvas;
     if (this.pointerOver) this.setPointerNdc(e.clientX, e.clientY);
   }
 
-  private setPointerNdc(clientX: number, clientY: number) {
+  /** Returns whether the point lies on the canvas. */
+  private setPointerNdc(clientX: number, clientY: number): boolean {
     const rect = this.canvas.getBoundingClientRect();
-    this.pointerNdc.set(
-      ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
-      -((clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1,
-    );
+    const x = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    const y = -((clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
+    this.pointerNdc.set(x, y);
+    return Math.abs(x) <= 1 && Math.abs(y) <= 1;
   }
 
   /** Raycasts the real, settled letters (world matrices from the last rendered frame). */
@@ -893,7 +915,8 @@ export class LettersEngine {
     for (let i = this.dying.length - 1; i >= 0; i--) {
       const node = this.dying[i];
       this.updateNode(node, dt, rise);
-      if (node.fade <= 0) {
+      // Unpainted nodes never fade (updateNode skips them), so drop them right away.
+      if (node.fade <= 0 || !node.painted) {
         this.disposeNode(node);
         this.dying.splice(i, 1);
       }

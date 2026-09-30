@@ -59,12 +59,21 @@ describe("validateForm", () => {
 });
 
 describe("isValidContact", () => {
-  it.each(["0551234567", "551234567", "+966551234567", "00966 55 123 4567", "٠٥٥١٢٣٤٥٦٧", "a@b.co"])(
-    "accepts %s",
-    (v) => expect(isValidContact(v)).toBe(true),
-  );
-  it.each(["", "12345", "0451234567", "name@", "@mail.com", "a@b"])("rejects %s", (v) =>
-    expect(isValidContact(v)).toBe(false),
+  it.each([
+    "0551234567",
+    "551234567",
+    "+966551234567",
+    "+966 0551234567",
+    "966551234567",
+    "00966 55 123 4567",
+    "055-123-4567",
+    "٠٥٥١٢٣٤٥٦٧",
+    "a@b.co",
+    "Name.Last@Mail.COM",
+  ])("accepts %s", (v) => expect(isValidContact(v)).toBe(true));
+  it.each(["", "12345", "0451234567", "name@", "@mail.com", "a@b", "a..b@mail.com", "نورة@مثال.سعودي"])(
+    "rejects %s",
+    (v) => expect(isValidContact(v)).toBe(false),
   );
 });
 
