@@ -4,8 +4,10 @@ import {
   cleanQueryName,
   effectiveQuery,
   isFemaleTitle,
+  lettersCount,
   looksLong,
   mergeUnique,
+  postmarkDate,
   tiltFor,
   wallSearchUrl,
 } from "./wall-utils";
@@ -97,10 +99,50 @@ describe("wallSearchUrl", () => {
   });
 });
 
+describe("lettersCount", () => {
+  it.each([
+    [0, "0 رسالة"],
+    [1, "رسالة"],
+    [2, "رسالتين"],
+    [3, "3 رسائل"],
+    [10, "10 رسائل"],
+    [11, "11 رسالة"],
+    [99, "99 رسالة"],
+    [100, "100 رسالة"],
+    [101, "101 رسالة"],
+    [102, "102 رسالة"],
+    [103, "103 رسائل"],
+    [110, "110 رسائل"],
+    [111, "111 رسالة"],
+    [240, "240 رسالة"],
+    [1000, "1,000 رسالة"],
+  ])("%i → %s", (n, expected) => {
+    expect(lettersCount(n)).toBe(expected);
+  });
+
+  it("can spell out a lone letter", () => {
+    expect(lettersCount(1, { one: "رسالة وحدة" })).toBe("رسالة وحدة");
+    expect(lettersCount(5, { one: "رسالة وحدة" })).toBe("5 رسائل");
+  });
+});
+
+describe("postmarkDate", () => {
+  it("uses Riyadh time", () => {
+    expect(postmarkDate("2026-09-29T08:00:00.000Z")).toEqual({ day: "29", month: "سبتمبر" });
+    // 22:30 UTC on 4 Oct is already 5 Oct in Riyadh
+    expect(postmarkDate("2026-10-04T22:30:00.000Z")).toEqual({ day: "5", month: "أكتوبر" });
+  });
+  it("ignores bad dates", () => {
+    expect(postmarkDate("nope")).toBeNull();
+  });
+});
+
 describe("misc", () => {
-  it("alternates tilt", () => {
-    expect(tiltFor(0)).toBe(-0.6);
-    expect(tiltFor(1)).toBe(0.6);
+  it("tilts unevenly but stays small", () => {
+    const tilts = Array.from({ length: 12 }, (_, i) => tiltFor(i));
+    expect(new Set(tilts).size).toBeGreaterThan(2);
+    expect(tilts.every((t) => Math.abs(t) <= 1)).toBe(true);
+    expect(tiltFor(0)).not.toBe(tiltFor(1));
   });
   it("guesses long bodies", () => {
     expect(looksLong("قصيرة")).toBe(false);

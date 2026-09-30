@@ -23,9 +23,60 @@ export function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
-/** Postgres connection string, or null to use the local JSON file store. */
+/** Serverless hosts: many short-lived instances, no shared disk. */
+export function isServerless(): boolean {
+  return !!(readEnv("VERCEL") || readEnv("AWS_LAMBDA_FUNCTION_NAME") || readEnv("NETLIFY"));
+}
+
+/**
+ * Postgres connection string, or null to use the local JSON file store.
+ * POSTGRES_URL is what the Vercel storage integrations (Neon / Supabase) inject;
+ * on serverless it should be the provider's POOLED url (Supabase :6543, Neon "-pooler").
+ */
 export function getDatabaseUrl(): string | null {
-  return readEnv("DATABASE_URL") ?? null;
+  return readEnv("DATABASE_URL") ?? readEnv("POSTGRES_URL") ?? null;
+}
+
+const truthy = (v: string | undefined) => !!v && ["1", "true", "yes"].includes(v.toLowerCase());
+
+/**
+ * Without a database, may the JSON file store be used? Always off serverless
+ * hosts; there it is per-instance and lost on scale-down, so only an explicit
+ * throwaway demo (SEED_DEMO=true or ALLOW_FILE_STORE=1) gets it.
+ */
+export function isFileStoreAllowed(): boolean {
+  if (!isServerless()) return true;
+  return truthy(readEnv("ALLOW_FILE_STORE")) || truthy(readEnv("SEED_DEMO"));
+}
+
+/** Postgres pool size per instance: serverless instances each get their own pool, keep it tiny. */
+export function getPgPoolMax(): number {
+  return Math.min(20, readInt("PG_POOL_MAX", isServerless() ? 2 : 5, 1));
+}
+
+/**
+ * How many proxies in front of the app append to X-Forwarded-For (default 1:
+ * Vercel / one nginx / one load balancer). The client IP is the entry that many
+ * from the right; everything left of it is client-controlled. 0 = trust no proxy
+ * header at all (the app is exposed directly).
+ */
+export function getTrustedProxyHops(): number {
+  return Math.min(10, readInt("TRUSTED_PROXY_HOPS", 1, 0));
+}
+
+/**
+ * Optional single header your edge sets to the real client IP and strips from
+ * incoming requests, e.g. cf-connecting-ip behind Cloudflare or x-real-ip from
+ * your own nginx. Takes precedence over X-Forwarded-For.
+ */
+export function getClientIpHeader(): string | null {
+  const v = readEnv("CLIENT_IP_HEADER")?.toLowerCase();
+  return v && /^[a-z0-9-]{1,64}$/.test(v) ? v : null;
+}
+
+/** Per-instance cache for the default wall / scene / counter / letter reads. 0 disables. */
+export function getReadCacheTtlMs(): number {
+  return Math.min(60_000, readInt("READ_CACHE_TTL_MS", 5_000, 0));
 }
 
 let warnedSalt = false;
@@ -84,9 +135,9 @@ export function shouldSeedDemo(): boolean {
 /** Directory for the JSON file store. */
 export function getDataDir(): string {
   const dir = readEnv("DATA_DIR");
-  // Serverless hosts (Vercel) only allow writes under /tmp — a zero-config test
+  // Serverless hosts (Vercel) only allow writes under /tmp — a throwaway demo
   // deploy then works, though data is per-instance and short-lived.
-  if (!dir && process.env.VERCEL) return path.join(/*turbopackIgnore: true*/ os.tmpdir(), "letters-data");
+  if (!dir && isServerless()) return path.join(/*turbopackIgnore: true*/ os.tmpdir(), "letters-data");
   // turbopackIgnore: a runtime-configured folder must not pull the project into the trace.
   return dir
     ? path.resolve(/*turbopackIgnore: true*/ process.cwd(), dir)

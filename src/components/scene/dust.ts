@@ -15,6 +15,8 @@ export interface Dust {
   points: Points<BufferGeometry, PointsMaterial>;
   /** Half extents of the box particles wrap around in. */
   setBounds(halfW: number, halfH: number): void;
+  /** Keep the depth band around a moving camera (z wraps, so dust streams past). */
+  follow(camZ: number): void;
   update(dt: number, time: number): void;
   dispose(): void;
 }
@@ -34,6 +36,8 @@ export function createDust(count: number, halfW: number, halfH: number, seed: nu
   const c = new Color();
   let bw = halfW;
   let bh = halfH;
+  let camZ: number | null = null;
+  const zSpan = DUST.zMax - DUST.zMin;
 
   for (let i = 0; i < count; i++) {
     base[i * 3] = range(rng, -bw, bw);
@@ -85,6 +89,9 @@ export function createDust(count: number, halfW: number, halfH: number, seed: nu
       bw = w;
       bh = h;
     },
+    follow(z) {
+      camZ = z;
+    },
     update(dt, time) {
       const arr = posAttr.array as Float32Array;
       for (let i = 0; i < count; i++) {
@@ -95,7 +102,13 @@ export function createDust(count: number, halfW: number, halfH: number, seed: nu
         base[k] = wrap(base[k], bw);
         arr[k] = base[k] + Math.sin(time * 0.3 + phase[i]) * 0.25;
         arr[k + 1] = y;
-        arr[k + 2] = base[k + 2] + Math.cos(time * 0.2 + phase[i]) * 0.15;
+        let z = base[k + 2];
+        if (camZ !== null) {
+          // Relative to the camera: DUST.zMin (far) … DUST.zMax (just behind), wrapping.
+          const rel = (((z - DUST.zMin - camZ) % zSpan) + zSpan) % zSpan;
+          z = camZ + DUST.zMin + rel;
+        }
+        arr[k + 2] = z + Math.cos(time * 0.2 + phase[i]) * 0.15;
       }
       posAttr.needsUpdate = true;
     },

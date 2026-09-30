@@ -15,7 +15,7 @@ import { fetchMessage, likeMessage } from "@/lib/api-client";
 import { emitNewLetter, LETTER_HIDDEN_EVENT } from "@/lib/events";
 import { toSceneLetter } from "@/lib/format";
 import { track } from "@/lib/track";
-import type { PublicMessage } from "@/lib/types";
+import type { LikeResult, PublicMessage } from "@/lib/types";
 
 /**
  * Page-wide client state shared by the hero scene, the form, the wall and the
@@ -67,6 +67,136 @@ export function useLetters(): LettersContextValue {
 
 const LIKED_KEY = "tcz_liked_v1";
 const PERMALINK_RE = /^\/m\/([A-Za-z0-9_-]{4,32})\/?$/;
+
+// ------------------------------------------------------------ history ---
+
+/** Marks the /m/:id entries this app pushed (Next.js keeps extra keys in history.state). */
+const OWN_ENTRY = "tczLetter";
+
+export interface HistoryWindow {
+  location: { pathname: string; search: string; hash: string };
+  history: Pick<History, "state" | "pushState" | "replaceState" | "back">;
+  scrollY: number;
+  scrollTo(options: ScrollToOptions): void;
+  requestAnimationFrame(cb: () => void): number;
+}
+
+/**
+ * Keeps /m/:id in the address bar in step with the letter view:
+ *  - opening from the page pushes /m/:id (stepping between letters replaces it),
+ *  - closing goes Back when the entry is ours, otherwise rewrites to "/",
+ *  - the reader's scroll position survives the round trip (a "#letters" hash
+ *    would otherwise make the browser jump to the anchor on the way back).
+ */
+export function letterHistory(win: HistoryWindow) {
+  let savedScroll: number | null = null;
+
+  const ownsEntry = () => Boolean((win.history.state as Record<string, unknown> | null)?.[OWN_ENTRY]);
+  const mark = () => ({ [OWN_ENTRY]: 1 });
+
+  const restoreScroll = () => {
+    const y = savedScroll;
+    savedScroll = null;
+    if (y === null) return;
+    win.requestAnimationFrame(() => win.scrollTo({ top: y, behavior: "instant" }));
+  };
+
+  return {
+    /** A letter is about to show. `push`: opened on this page (not via Back/Forward). */
+    open(id: string, push: boolean, wasOpen: boolean) {
+      if (!wasOpen) savedScroll = win.scrollY;
+      if (!push) return;
+      const path = `/m/${id}`;
+      const { pathname, search, hash } = win.location;
+      if (pathname === path) return;
+      if (PERMALINK_RE.test(pathname)) {
+        // Stepping between letters: replace, so Back still closes the view.
+        win.history.replaceState(ownsEntry() ? mark() : null, "", path);
+        return;
+      }
+      if (hash) win.history.replaceState(null, "", pathname + search);
+      win.history.pushState(mark(), "", path);
+    },
+    /** The visitor closed the view (✕, Esc, swipe, report…). */
+    close() {
+      if (!PERMALINK_RE.test(win.location.pathname)) return restoreScroll();
+      // Our own entry: step back to the page it came from (popstate restores scroll).
+      if (ownsEntry()) return win.history.back();
+      // Landed straight on a permalink: rewrite instead of leaving the site.
+      win.history.replaceState(null, "", "/");
+      restoreScroll();
+    },
+    /** Back/Forward landed on a page without an open letter. */
+    popClosed: restoreScroll,
+  };
+}
+
+// -------------------------------------------------------------- likes ---
+
+interface LikeJob {
+  /** Last state the server confirmed (or the state before the first tap). */
+  confirmed: { liked: boolean; count: number };
+  /** What the visitor wants right now (what the button shows). */
+  want: boolean;
+  running: Promise<void> | null;
+}
+
+/**
+ * Like toggles, one request at a time per letter. Taps while a request is in
+ * flight only change the wish; when the response lands the latest wish is sent
+ * if it differs, so the button, localStorage and the server end up agreeing no
+ * matter how fast the visitor taps or in which order responses arrive.
+ */
+export function createLikeSync(deps: {
+  send: (id: string, like: boolean) => Promise<LikeResult | null>;
+  read: (m: { id: string; likes: number }) => { liked: boolean; count: number };
+  write: (id: string, liked: boolean, count: number) => void;
+}) {
+  const jobs = new Map<string, LikeJob>();
+
+  const shown = (job: LikeJob) => {
+    const { liked, count } = job.confirmed;
+    return job.want === liked ? count : count + (job.want ? 1 : -1);
+  };
+
+  async function drain(id: string, job: LikeJob) {
+    for (;;) {
+      const sent = job.want;
+      const res = await deps.send(id, sent);
+      if (!res) {
+        job.want = job.confirmed.liked;
+        deps.write(id, job.confirmed.liked, job.confirmed.count);
+        return;
+      }
+      job.confirmed = { liked: res.liked, count: res.likes };
+      // Settled unless the visitor flipped it again while this was in flight.
+      if (job.want === res.liked || job.want === sent) {
+        job.want = res.liked;
+        deps.write(id, res.liked, res.likes);
+        return;
+      }
+    }
+  }
+
+  return function toggle(m: { id: string; likes: number }): Promise<void> {
+    let job = jobs.get(m.id);
+    const now = deps.read(m);
+    if (!job) {
+      job = { confirmed: now, want: now.liked, running: null };
+      jobs.set(m.id, job);
+    } else if (!job.running) {
+      job.confirmed = now; // idle: another tab may have changed it
+    }
+    job.want = !now.liked;
+    deps.write(m.id, job.want, shown(job));
+    if (job.running) return job.running;
+    const j = job;
+    j.running = drain(m.id, j).finally(() => {
+      j.running = null;
+    });
+    return j.running;
+  };
+}
 
 function readLiked(): Set<string> {
   try {
@@ -144,9 +274,11 @@ export function LettersProvider({
   const cache = useRef(new Map<string, PublicMessage>());
   const hiddenRef = useRef(new Set<string>());
   const listeners = useRef(new Set<(m: PublicMessage) => void>());
-  /** True when *we* pushed the /m/:id history entry (so close can go back). */
-  const pushedRef = useRef(false);
   const openReq = useRef(0);
+  /** The open letter, readable synchronously from handlers. */
+  const openRef = useRef<PublicMessage | null>(initialOpen);
+  const historyRef = useRef<ReturnType<typeof letterHistory> | null>(null);
+  const nav = useCallback(() => (historyRef.current ??= letterHistory(window)), []);
 
   // Seed the lookup cache with what the server rendered.
   useEffect(() => {
@@ -161,21 +293,12 @@ export function LettersProvider({
 
   const show = useCallback((m: PublicMessage, push: boolean) => {
     cache.current.set(m.id, m);
+    const wasOpen = openRef.current !== null;
+    openRef.current = m;
     setOpenMessage(m);
     track("letter_open", { id: m.id });
-    if (push && typeof window !== "undefined") {
-      const path = `/m/${m.id}`;
-      if (window.location.pathname !== path) {
-        if (PERMALINK_RE.test(window.location.pathname)) {
-          // Stepping between letters: replace, so Back closes the view.
-          window.history.replaceState(null, "", path);
-        } else {
-          window.history.pushState(null, "", path);
-          pushedRef.current = true;
-        }
-      }
-    }
-  }, []);
+    if (typeof window !== "undefined") nav().open(m.id, push, wasOpen);
+  }, [nav]);
 
   const openById = useCallback(
     async (id: string, push: boolean) => {
@@ -202,16 +325,11 @@ export function LettersProvider({
 
   const closeLetter = useCallback(() => {
     openReq.current++;
+    const wasOpen = openRef.current !== null;
+    openRef.current = null;
     setOpenMessage(null);
-    if (typeof window === "undefined") return;
-    if (!PERMALINK_RE.test(window.location.pathname)) return;
-    if (pushedRef.current) {
-      pushedRef.current = false;
-      window.history.back();
-    } else {
-      window.history.replaceState(null, "", "/");
-    }
-  }, []);
+    if (wasOpen && typeof window !== "undefined") nav().close();
+  }, [nav]);
 
   // Back / forward buttons.
   useEffect(() => {
@@ -220,14 +338,15 @@ export function LettersProvider({
       if (match) {
         void openById(match[1], false);
       } else {
-        pushedRef.current = false;
         openReq.current++;
+        openRef.current = null;
         setOpenMessage(null);
+        nav().popClosed();
       }
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [openById]);
+  }, [openById, nav]);
 
   // A letter taken off the wall from this page (removal request / reports).
   useEffect(() => {
@@ -274,28 +393,31 @@ export function LettersProvider({
     [counts],
   );
 
-  const countsRef = useRef(counts);
-  useEffect(() => {
-    countsRef.current = counts;
-  }, [counts]);
+  // Written synchronously so rapid taps read the count they just produced.
+  const countsRef = useRef<Record<string, number>>({});
+  const [likeSync] = useState(() =>
+    createLikeSync({
+      send: likeMessage,
+      read: (m) => ({
+        liked: likedStore.get().has(m.id),
+        count: countsRef.current[m.id] ?? m.likes,
+      }),
+      write: (id, isLiked, count) => {
+        const n = Math.max(0, count);
+        countsRef.current = { ...countsRef.current, [id]: n };
+        likedStore.update(id, isLiked);
+        setCounts(countsRef.current);
+      },
+    }),
+  );
 
-  const toggleLike = useCallback(async (m: PublicMessage) => {
-    const wasLiked = likedStore.get().has(m.id);
-    const before = countsRef.current[m.id] ?? m.likes;
-    const nextLiked = !wasLiked;
-
-    const apply = (isLikedNow: boolean, count: number) => {
-      likedStore.update(m.id, isLikedNow);
-      setCounts((c) => ({ ...c, [m.id]: Math.max(0, count) }));
-    };
-
-    apply(nextLiked, before + (nextLiked ? 1 : -1));
-    if (nextLiked) track("letter_like", { id: m.id });
-
-    const res = await likeMessage(m.id, nextLiked);
-    if (res) apply(res.liked, res.likes);
-    else apply(wasLiked, before);
-  }, []);
+  const toggleLike = useCallback(
+    (m: PublicMessage) => {
+      if (!likedStore.get().has(m.id)) track("letter_like", { id: m.id });
+      return likeSync(m);
+    },
+    [likeSync],
+  );
 
   const requestPrefill = useCallback((toName: string) => {
     setPrefill({ toName, nonce: Date.now() });

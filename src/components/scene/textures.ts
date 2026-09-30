@@ -24,25 +24,39 @@ const PLUM_INK = "#691d4e";
 const FILLER_PAPER = { top: "#fffdf9", bottom: "#f4ece0", edge: "#dccbbd" };
 const FOLD_V = 0.5 - FOLD_CENTER_Y / LETTER_H; // canvas y fraction of the fold centre
 
-const WAX = {
+type Wax = { base: string; light: string; dark: string; heart: string };
+const WAX: Record<"orange" | "memory", Wax> = {
   orange: { base: "#eb652c", light: "#f7a06f", dark: "#b8461a", heart: "#fff4ee" },
   memory: { base: "#bcb2c5", light: "#e6e0eb", dark: "#8a7e95", heart: "#ffffff" },
 };
 
-const FALLBACK_FAMILY = '"Aref Ruqaa", serif';
+/** Sealed in the writer's colour, like the wax seal in the letter view. */
+function waxFor(accent: string): Wax {
+  return {
+    base: accent,
+    light: mixHex(accent, "#ffffff", 0.42),
+    dark: mixHex(accent, "#1a0610", 0.32),
+    heart: mixHex(accent, "#ffffff", 0.92),
+  };
+}
+
+// Letter bodies are set in the brand face (Molhim); Plex covers Latin and «».
+const FALLBACK_FAMILY = '"Molhim", "IBM Plex Sans Arabic", system-ui, sans-serif';
 
 // ---------------------------------------------------------------- fonts ---
 
 /**
- * next/font gives Aref Ruqaa a hashed family name exposed as --font-ruqaa.
- * Resolves with a canvas-ready family list once the face is loaded (or after
- * `timeoutMs`, in which case the fallback serif is used for painting).
+ * next/font gives Molhim / Plex hashed family names, exposed as --font-molhim
+ * and --font-plex. Resolves with a canvas-ready family list once the face is
+ * loaded (or after `timeoutMs`, in which case the fallbacks paint).
  */
-export async function loadHandFamily(timeoutMs = 1500): Promise<string> {
+export async function loadPaperFamily(timeoutMs = 1500): Promise<string> {
   let family = FALLBACK_FAMILY;
   try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue("--font-ruqaa").trim();
-    if (v) family = `${v}, ${FALLBACK_FAMILY}`;
+    const css = getComputedStyle(document.documentElement);
+    const molhim = css.getPropertyValue("--font-molhim").trim();
+    const plex = css.getPropertyValue("--font-plex").trim();
+    family = [molhim, plex, FALLBACK_FAMILY].filter(Boolean).join(", ");
   } catch {
     /* keep fallback */
   }
@@ -92,7 +106,7 @@ interface Palette {
   inkAlpha: number;
   edge: string;
   edgeAlpha: number;
-  wax: (typeof WAX)["orange"];
+  wax: Wax;
 }
 
 function paletteFor(spec: PaintSpec): Palette {
@@ -116,7 +130,7 @@ function paletteFor(spec: PaintSpec): Palette {
     inkAlpha: 0.55,
     edge: spec.style.accent,
     edgeAlpha: memory ? 0.35 : 0.55,
-    wax: memory ? WAX.memory : WAX.orange,
+    wax: memory ? WAX.memory : waxFor(spec.style.accent),
   };
 }
 
@@ -129,8 +143,15 @@ export function paperBackColor(spec: Pick<PaintSpec, "kind" | "style">): string 
 
 type Pt = { x: number; y: number };
 
-export function paintLetterCanvas(spec: PaintSpec, size: { w: number; h: number }, family: string): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
+/** Paints a letter; pass `target` to repaint a canvas in place (its texture then needs an upload). */
+export function paintLetterCanvas(
+  spec: PaintSpec,
+  size: { w: number; h: number },
+  family: string,
+  target?: HTMLCanvasElement,
+): HTMLCanvasElement {
+  const canvas = target ?? document.createElement("canvas");
+  // Assigning the size also clears the canvas and resets the context state.
   canvas.width = size.w;
   canvas.height = size.h;
   const ctx = canvas.getContext("2d");
@@ -273,7 +294,7 @@ function drawText(
   const text = spec.text.replace(/\s+/g, " ").trim();
   if (!text) return;
 
-  const px = Math.round(H * (spec.kind === "filler" ? 0.095 : 0.078));
+  const px = Math.round(H * (spec.kind === "filler" ? 0.088 : 0.07));
   ctx.save();
   ctx.font = `400 ${px}px ${family}`;
   ctx.direction = "rtl";
@@ -289,7 +310,7 @@ function drawText(
   let wrapped = wrapIntoBoxes(text, [box(0.8), box(0.915)], measure);
   if (wrapped.truncated) wrapped = wrapIntoBoxes(text, [box(0.4), box(0.52), box(0.8), box(0.915)], measure);
 
-  // A slight slant so it reads as handwriting.
+  // A slight slant, as if written on a folded sheet.
   const cx = W / 2;
   const cy = H * 0.7;
   ctx.translate(cx, cy);

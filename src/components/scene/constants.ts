@@ -5,10 +5,10 @@ import type { CalmZone } from "./layout";
 
 export interface SceneProfile {
   mobile: boolean;
-  /** Real letters shown at most (each owns a texture). */
+  /** Real letters shown at most (each owns a texture). Also the number of slots. */
   maxReal: number;
-  /** Letters in the field, real + filler. */
-  total: number;
+  /** Blank filler letters pad the field up to this many while there are fewer real ones. */
+  minField: number;
   tex: { w: number; h: number };
   fillerTex: { w: number; h: number };
   /** Filler letters share this many textures. */
@@ -27,7 +27,7 @@ export interface SceneProfile {
 export const DESKTOP: SceneProfile = {
   mobile: false,
   maxReal: 40,
-  total: 54,
+  minField: 24,
   tex: { w: 384, h: 308 },
   fillerTex: { w: 256, h: 205 },
   fillerTextures: 6,
@@ -43,8 +43,8 @@ export const DESKTOP: SceneProfile = {
 
 export const MOBILE: SceneProfile = {
   mobile: true,
-  maxReal: 22,
-  total: 30,
+  maxReal: 28,
+  minField: 20,
   tex: { w: 256, h: 205 },
   fillerTex: { w: 192, h: 154 },
   fillerTextures: 4,
@@ -60,8 +60,13 @@ export const MOBILE: SceneProfile = {
 export const MOBILE_QUERY = "(max-width: 767px)";
 export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
-/** GPU texture budget per profile (bytes). */
+/** GPU texture budget per engine instance (bytes). */
 export const TEXTURE_BUDGET = { desktop: 32 * 1024 * 1024, mobile: 12 * 1024 * 1024 };
+
+/** How many letters the field holds: every real one (≤ maxReal), padded with fillers up to minField. */
+export function fieldSize(realCount: number, p: Pick<SceneProfile, "maxReal" | "minField">): number {
+  return Math.min(p.maxReal, Math.max(p.minField, realCount));
+}
 
 /** RGBA8 + full mip chain (≈ 4/3). */
 export function textureBytes(w: number, h: number, mipmaps = true): number {
@@ -167,3 +172,89 @@ export const FILLER_SNIPPETS = [
   "شكراً من القلب",
   "أثرك باقي",
 ];
+
+// ------------------------------------------------------------ immersive ---
+// The "all letters" tunnel: the camera travels down −z through a helix of
+// letters. Slot k sits `readDist + k·spacing` ahead of the start; a fixed pool
+// of meshes is recycled as the camera moves (see tunnel-math.ts).
+
+export interface TunnelProfile {
+  mobile: boolean;
+  /** Letter meshes (each owns a reusable canvas texture). */
+  pool: number;
+  tex: { w: number; h: number };
+  fillerTex: { w: number; h: number };
+  fillerTextures: number;
+  dust: number;
+  letterScale: number;
+  anisotropy: number;
+  /** Ring radius range as a fraction of the half view at readDist. */
+  ring: readonly [number, number];
+}
+
+export const TUNNEL_DESKTOP: TunnelProfile = {
+  mobile: false,
+  pool: 34,
+  tex: { w: 384, h: 308 },
+  fillerTex: { w: 256, h: 205 },
+  fillerTextures: 3,
+  dust: 260,
+  letterScale: 1.05,
+  anisotropy: 4,
+  ring: [0.3, 0.86],
+};
+
+export const TUNNEL_MOBILE: TunnelProfile = {
+  mobile: true,
+  pool: 24,
+  tex: { w: 320, h: 256 },
+  fillerTex: { w: 192, h: 154 },
+  fillerTextures: 2,
+  dust: 110,
+  letterScale: 0.82,
+  anisotropy: 2,
+  ring: [0.22, 0.8],
+};
+
+export function tunnelBudgetBytes(p: TunnelProfile): number {
+  return (
+    p.pool * textureBytes(p.tex.w, p.tex.h) +
+    p.fillerTextures * textureBytes(p.fillerTex.w, p.fillerTex.h) +
+    textureBytes(DUST_TEX, DUST_TEX)
+  );
+}
+
+export const TUNNEL = {
+  /** World units between consecutive letters along the path. */
+  spacing: 0.62,
+  /** Slot k is this far ahead of the camera when travel = k·spacing (the "current" letter). */
+  readDist: 3.1,
+  /** Letters stay this far behind the camera before they recycle to the far end. */
+  behind: 1.2,
+  /** Opacity ramps in from `near[0]` to `near[1]` world units in front of the camera. */
+  near: [0.45, 1.5] as const,
+  /** Fraction of the visible depth where far letters start to appear out of the fog. */
+  farFadeFrom: 0.55,
+  /** Travel easing (1/s) and the fastest the camera may fly (units/s). */
+  ease: 5.5,
+  maxSpeed: 10,
+  /** World units per wheel pixel / per dragged pixel. */
+  wheel: 0.0058,
+  drag: 0.0085,
+  /** Fling: velocity decay (1/s) and the max speed a release can carry (units/s). */
+  flingDecay: 3.2,
+  flingMax: 7,
+  /** Idle auto-drift (units/s), after this many seconds without input, eased in over `driftRamp`. */
+  drift: 0.3,
+  idleAfter: 2.4,
+  driftRamp: 1.6,
+  /** Reduced motion: one wheel/swipe gesture steps one letter; ignore repeats for this long (ms). */
+  stepCooldownMs: 380,
+  /** Pull the camera back by this much on open and glide in. */
+  introPullback: 1.8,
+  tilt: { x: 0.28, y: 0.34, z: 0.42 },
+  /** How much each letter turns to face the camera (0..1). */
+  face: 0.55,
+  fov: { landscape: 50, portrait: 64 },
+  fogNear: 6,
+};

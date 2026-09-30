@@ -3,26 +3,83 @@
 // privacy-safe error logging.
 
 import { createHash, randomBytes } from "node:crypto";
+import { isIP } from "node:net";
 import { NextResponse } from "next/server";
 import { COPY } from "./config";
-import { getIpHashSalt, isProduction } from "./server-config";
+import {
+  getClientIpHeader,
+  getIpHashSalt,
+  getTrustedProxyHops,
+  isProduction,
+} from "./server-config";
+import { StoreUnavailableError } from "./store/errors";
+
+// ---------------------------------------------------------------------------
+// Client IP. Every proxy APPENDS to X-Forwarded-For, so only the entries added
+// by proxies we trust are real; the leftmost ones are whatever the client sent.
+// ---------------------------------------------------------------------------
 
 const MAX_IP_LENGTH = 64;
 
-function firstHeader(req: Request, name: string): string | null {
-  const v = req.headers.get(name);
-  if (!v) return null;
-  const first = v.split(",")[0]?.trim();
-  return first && first.length <= MAX_IP_LENGTH ? first : null;
+/** "1.2.3.4:80" → "1.2.3.4", "[2001:db8::1]:443" → "2001:db8::1", "::ffff:1.2.3.4" → "1.2.3.4"; null if not an IP. */
+export function normalizeIp(raw: string | null | undefined): string | null {
+  let s = raw?.trim() ?? "";
+  if (!s || s.length > MAX_IP_LENGTH) return null;
+  const bracketed = /^\[([^\]]+)\](?::\d{1,5})?$/.exec(s);
+  if (bracketed) s = bracketed[1];
+  else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}$/.test(s)) s = s.slice(0, s.lastIndexOf(":"));
+  s = s.toLowerCase();
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(s);
+  if (mapped) s = mapped[1];
+  return isIP(s) ? s : null;
 }
 
-/** Best-effort client IP from proxy headers (first hop of x-forwarded-for wins). */
+/** The rightmost entry of a comma-separated header (the one the nearest hop set). */
+function lastEntry(value: string | null): string | null {
+  const parts = value?.split(",").map((p) => p.trim()).filter(Boolean) ?? [];
+  return normalizeIp(parts.at(-1));
+}
+
+/** The entry `hops` from the right: the address the outermost trusted proxy saw. */
+export function ipFromForwardedFor(value: string | null, hops: number): string | null {
+  if (!value || hops <= 0) return null;
+  const parts = value.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  return normalizeIp(parts[Math.max(0, parts.length - hops)]);
+}
+
+/**
+ * Client IP, in order of trust:
+ * 1. CLIENT_IP_HEADER when configured (cf-connecting-ip behind Cloudflare, x-real-ip from your nginx);
+ * 2. on Vercel, the headers its edge sets and overwrites (x-vercel-forwarded-for, x-real-ip);
+ * 3. X-Forwarded-For, TRUSTED_PROXY_HOPS entries from the right (never the client-controlled first hop).
+ */
 export function getClientIp(req: Request): string | null {
-  return (
-    firstHeader(req, "x-forwarded-for") ??
-    firstHeader(req, "x-real-ip") ??
-    firstHeader(req, "cf-connecting-ip")
-  );
+  const configured = getClientIpHeader();
+  if (configured) return lastEntry(req.headers.get(configured));
+  if (process.env.VERCEL) {
+    const v = lastEntry(req.headers.get("x-vercel-forwarded-for")) ?? lastEntry(req.headers.get("x-real-ip"));
+    if (v) return v;
+  }
+  return ipFromForwardedFor(req.headers.get("x-forwarded-for"), getTrustedProxyHops());
+}
+
+/**
+ * What rate limits and dedupe key on: the IPv4 address, or the /64 prefix of an
+ * IPv6 one (a single subscriber owns a whole /64, so per-address keys are free to rotate).
+ */
+export function ipKey(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail] = ip.split("%")[0].split("::");
+  const groups = (s: string | undefined) => (s ? s.split(":") : []);
+  const width = (g: string[]) => g.reduce((n, x) => n + (x.includes(".") ? 2 : 1), 0);
+  const h = groups(head);
+  const t = groups(tail);
+  const full = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - width(h) - width(t))).fill("0"), ...t];
+  return `${full
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ""))
+    .join(":")}::/64`;
 }
 
 /** Salted SHA-256, hex, truncated to 32 chars. Used for IPs and device ids. */
@@ -32,7 +89,7 @@ export function hashValue(value: string): string {
 
 export function hashIp(req: Request): string | null {
   const ip = getClientIp(req);
-  return ip ? hashValue(`ip:${ip}`) : null;
+  return ip ? hashValue(`ip:${ipKey(ip)}`) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +227,19 @@ export function notFound(): NextResponse {
 
 export function serverError(): NextResponse {
   return jsonNoStore({ error: "server" }, 500);
+}
+
+export const UNAVAILABLE_MESSAGE = "الموقع قيد التجهيز وما نقدر نستقبل هذا الطلب الحين، جرّب بعد شوي 🙏";
+
+export function serviceUnavailable(): NextResponse {
+  return jsonNoStore({ error: "server", message: UNAVAILABLE_MESSAGE }, 503, { "Retry-After": "120" });
+}
+
+/** A failed store call: 503 when no database is configured (logged by the store), else a logged 500. */
+export function storeFailure(context: string, e: unknown): NextResponse {
+  if (e instanceof StoreUnavailableError) return serviceUnavailable();
+  logError(context, e);
+  return serverError();
 }
 
 export function rateLimited(retryAfter: number): NextResponse {

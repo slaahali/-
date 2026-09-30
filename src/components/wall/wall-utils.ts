@@ -1,5 +1,6 @@
 // Pure helpers for the wall (no React, no DOM) so they can be unit tested.
 
+import { formatCount } from "@/lib/format";
 import { tokenizeQuery } from "@/lib/text/normalize";
 import type { PublicMessage } from "@/lib/types";
 
@@ -72,9 +73,52 @@ export function wallSearchUrl(
   return `/${qs ? `?${qs}` : ""}${loc.hash === "#letters" ? loc.hash : ""}`;
 }
 
-/** Small alternating tilt so the wall looks hand-pinned (degrees). */
+const TILTS = [-0.7, 0.5, -0.35, 0.8, -0.55, 0.3];
+
+/** Small uneven tilt so the wall looks hand-pinned, not stamped out (degrees). */
 export function tiltFor(index: number): number {
-  return index % 2 === 0 ? -0.6 : 0.6;
+  return TILTS[((index % TILTS.length) + TILTS.length) % TILTS.length];
+}
+
+/**
+ * Arabic count of letters with the right noun form:
+ * «رسالة»، «رسالتين»، «3 رسائل»، «11 رسالة»، «103 رسائل»، «1000 رسالة».
+ * `one` replaces the bare singular (e.g. «رسالة وحدة» where a lone noun reads oddly).
+ */
+export function lettersCount(n: number, opts: { one?: string } = {}): string {
+  const count = Math.max(0, Math.trunc(n));
+  if (count === 1) return opts.one ?? "رسالة";
+  if (count === 2) return "رسالتين";
+  const rest = count % 100;
+  const noun = rest >= 3 && rest <= 10 ? "رسائل" : "رسالة";
+  return `${formatCount(count)} ${noun}`;
+}
+
+const MONTHS = [
+  "يناير",
+  "فبراير",
+  "مارس",
+  "أبريل",
+  "مايو",
+  "يونيو",
+  "يوليو",
+  "أغسطس",
+  "سبتمبر",
+  "أكتوبر",
+  "نوفمبر",
+  "ديسمبر",
+];
+const RIYADH_OFFSET_MS = 3 * 3600_000; // no DST in Saudi Arabia
+
+/**
+ * Day + month for the postmark, in Riyadh time and without Intl, so the server
+ * and the browser always print the same thing (no hydration mismatch).
+ */
+export function postmarkDate(iso: string): { day: string; month: string } | null {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t + RIYADH_OFFSET_MS);
+  return { day: String(d.getUTCDate()), month: MONTHS[d.getUTCMonth()] };
 }
 
 /**
