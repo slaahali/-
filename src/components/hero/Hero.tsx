@@ -200,7 +200,9 @@ function CounterNote({ total, style }: { total: number; style: CSSProperties }) 
       <p className="-rotate-2 leading-7 text-plum">
         {total > 0 ? (
           <>
-            <span className="font-bold">{COPY.heroCount(total, formatCount(total))}</span>
+            <span className="font-bold">
+              <CountText text={COPY.heroCount(total, formatCount(total))} shown={formatCount(total)} />
+            </span>
             <br />
             <span className="text-ink-soft">{COPY.heroSearchNote} </span>
             <a
@@ -215,6 +217,17 @@ function CounterNote({ total, style }: { total: number; style: CSSProperties }) 
         )}
       </p>
     </div>
+  );
+}
+
+/** Molhim's «ر» swings under a digit before it: give the leading number some air. */
+function CountText({ text, shown }: { text: string; shown: string }) {
+  if (!text.startsWith(`${shown} `)) return <>{text}</>;
+  return (
+    <>
+      <span className="me-1">{shown}</span>
+      {text.slice(shown.length)}
+    </>
   );
 }
 

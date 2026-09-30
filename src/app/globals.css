@@ -101,6 +101,10 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     line-height: 1.7;
+    /* Molhim's kern table pulls «ر» into the word before it («اكتبرسالتك»,
+       «خلالر حلتك»); spacing is right with kerning off. Ruqaa and Plex keep
+       theirs (.font-hand, .font-latin, .stamp). */
+    font-kerning: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     overflow-x: clip;
@@ -265,7 +269,8 @@
   }
   .paper-grain { background-image: var(--paper-grain); }
 
-  .font-hand { font-family: var(--font-hand); }
+  .font-hand { font-family: var(--font-hand); font-kerning: normal; }
+  .font-latin { font-kerning: normal; }
 
   /* Section eyebrow: a small editorial label with a short rule, not a pill. */
   .eyebrow {
@@ -294,6 +299,7 @@
     border-radius: 0.55rem;
     box-shadow: inset 0 0 0 2px transparent, inset 0 0 0 3.25px currentColor;
     font-family: var(--font-hand);
+    font-kerning: normal;
     font-weight: 700;
     font-size: 1.15rem;
     line-height: 1.3;

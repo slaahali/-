@@ -75,7 +75,7 @@ export function CampaignPage({
     <LettersProvider initialTotal={initialTotal} initialMessages={seed} initialOpen={initialOpen}>
       <a
         href="#write"
-        className="fixed start-3 top-3 z-[60] -translate-y-24 rounded-full bg-plum px-4 py-2 font-bold text-white shadow-lift transition-transform focus:translate-y-0"
+        className="fixed start-3 top-3 z-[60] inline-flex min-h-11 -translate-y-24 items-center rounded-xl bg-plum px-4 font-bold text-white shadow-lift transition-transform focus:translate-y-0"
       >
         انتقل إلى كتابة رسالتك
       </a>
