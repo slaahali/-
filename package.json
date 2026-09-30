@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "assets": "node scripts/fetch-assets.mjs",
-    "db:schema": "node scripts/db-schema.mjs"
+    "db:schema": "node scripts/db-schema.mjs",
+    "vercel-build": "node scripts/vercel-build.mjs"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
